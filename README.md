@@ -1,4 +1,4 @@
-https://drive.google.com/file/d/11FAdIq6IuiXEOvr0bIDhw7EWxVoZDnkx/view?usp=sharing
+![agentX Logo](https://drive.google.com/uc?export=view&id=11FAdIq6IuiXEOvr0bIDhw7EWxVoZDnkx)
 
 # Agent-X: An Autonomous Crypto Trading Agent
 
