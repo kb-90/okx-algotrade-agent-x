@@ -353,3 +353,6 @@ Agent-X's behavior is controlled by the `demo` flag in `agent_x/config.py` or th
 - **Implementation**: Uses the `ccxt` library, a robust framework for interacting with cryptocurrency exchanges.
 - **Data Source**: Connects to OKX's live production WebSocket endpoints (`ws.okx.com`).
 - **Risk**: **You will be trading with real money.** Ensure your configuration is correct and you have tested your strategy thoroughly in demo mode first.
+
+### Please Show Your Support
+This open-source strategy represents months of daily dedication and hard work by its developer, now freely available for anyone to use without enduring the same exhaustive grind. If it helps generate profits for you, a small token of appreciation would be greatly valued to support ongoing efforts.
