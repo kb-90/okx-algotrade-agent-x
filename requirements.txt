@@ -1,0 +1,14 @@
+numpy
+pandas
+requests
+PyYAML
+ratelimit
+tensorflow
+scikit-learn
+joblib
+pytest
+pytest-mock
+python-dotenv
+matplotlib
+websocket-client
+python-okx

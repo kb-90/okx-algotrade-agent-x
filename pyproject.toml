@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent_x"
+version = "0.1.0"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "pandas",
+    "requests",
+    "PyYAML",
+    "ratelimit",
+    "tensorflow",
+    "scikit-learn",
+    "joblib",
+    "pytest",
+    "pytest-mock",
+    "python-dotenv",
+    "matplotlib",
+    "websocket-client",
+    "python-okx"
+]
+
+[tool.setuptools]
+packages = ["agent_x"]
+
+[project.scripts]
+agent-x = "agent_x.cli:main"
