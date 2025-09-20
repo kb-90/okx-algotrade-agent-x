@@ -93,29 +93,31 @@ def plot_equity_diagnostics(equity: pd.Series, out_path: Path, trade_history_pat
     # Plot entry and exit markers
     if trade_history_path and trade_history_path.exists():
         trade_history = pd.read_csv(trade_history_path)
-        trade_history['entry_time'] = pd.to_datetime(trade_history['entry_time'], errors='coerce')
-        trade_history['exit_time'] = pd.to_datetime(trade_history['exit_time'], errors='coerce')
+        if 'entry_time' in trade_history.columns:
+            trade_history['entry_time'] = pd.to_datetime(trade_history['entry_time'], errors='coerce')
+            trade_history['exit_time'] = pd.to_datetime(trade_history['exit_time'], errors='coerce')
 
-        for _, trade in trade_history.iterrows():
-            entry_time = trade['entry_time']
-            exit_time = trade['exit_time']
-            entry_equity = equity.asof(entry_time)
-            exit_equity = equity.asof(exit_time)
+            for _, trade in trade_history.iterrows():
+                entry_time = trade['entry_time']
+                exit_time = trade['exit_time']
+                entry_equity = equity.asof(entry_time)
+                exit_equity = equity.asof(exit_time)
 
-            if trade['level'] == 0:
-                if trade['side'] == 'long':
-                    ax_eq.plot(entry_time, entry_equity, '^', color='green', markersize=8, label='Long Entry')
+                if trade['level'] == 0:
+                    if trade['side'] == 'long':
+                        ax_eq.plot(entry_time, entry_equity, '^', color='green', markersize=8, label='Long Entry')
+                    else:
+                        ax_eq.plot(entry_time, entry_equity, 'v', color='red', markersize=8, label='Short Entry')
                 else:
-                    ax_eq.plot(entry_time, entry_equity, 'v', color='red', markersize=8, label='Short Entry')
-            else:
-                if trade['side'] == 'long':
-                    ax_eq.plot(entry_time, entry_equity, '^', color='yellow', markersize=6, label='Long Scale Entry')
-                else:
-                    ax_eq.plot(entry_time, entry_equity, 'v', color='orange', markersize=6, label='Short Scale Entry')
-            
-            ax_eq.plot(exit_time, exit_equity, 'o', color='blue', markersize=6, label='Exit')
+                    if trade['side'] == 'long':
+                        ax_eq.plot(entry_time, entry_equity, '^', color='yellow', markersize=6, label='Long Scale Entry')
+                    else:
+                        ax_eq.plot(entry_time, entry_equity, 'v', color='orange', markersize=6, label='Short Scale Entry')
+                
+                ax_eq.plot(exit_time, exit_equity, 'o', color='blue', markersize=6, label='Exit')
 
-            ax_eq.plot([entry_time, exit_time], [entry_equity, exit_equity], linestyle=':', color='gray', linewidth=1)
+                ax_eq.plot([entry_time, exit_time], [entry_equity, exit_equity], linestyle=':', color='gray', linewidth=1)
+        # If not backtest format, skip trade plotting for live mode
 
     # annotate metrics box
     text = (
@@ -145,8 +147,11 @@ def plot_equity_diagnostics(equity: pd.Series, out_path: Path, trade_history_pat
     # Returns histogram
     if trade_history_path and trade_history_path.exists():
         trade_history = pd.read_csv(trade_history_path)
-        trade_returns = trade_history['net_pnl'] / (trade_history['entry_price'] * trade_history['size'])
-        ax_hist.hist(trade_returns.to_numpy(), bins=60, color='tab:gray', alpha=0.9)
+        if 'net_pnl' in trade_history.columns and 'entry_price' in trade_history.columns and 'size' in trade_history.columns:
+            trade_returns = trade_history['net_pnl'] / (trade_history['entry_price'] * trade_history['size'])
+            ax_hist.hist(trade_returns.to_numpy(), bins=60, color='tab:gray', alpha=0.9)
+        else:
+            ax_hist.hist(returns.to_numpy(), bins=60, color='tab:gray', alpha=0.9)
     else:
         ax_hist.hist(returns.to_numpy(), bins=60, color='tab:gray', alpha=0.9)
     ax_hist.set_title('Returns Distribution')
