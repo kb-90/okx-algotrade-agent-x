@@ -7,6 +7,7 @@ import math
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Dict
+from pathlib import Path
 
 import pandas as pd
 import numpy as np
@@ -56,14 +57,14 @@ class Agent:
                 self.params = LSTMStratParams(**loaded)
                 logger.info(f"Loaded best params from disk: {self.params}")
             except TypeError as e:
-                logger.warning(f"Saved parameters don't match current structure: {{e}}")
+                logger.warning(f"Saved parameters don't match current structure: {e}")
                 logger.info("Converting old parameter structure or using defaults...")
                 try:
                     converted_params = self._convert_old_params(loaded)
                     self.params = LSTMStratParams(**converted_params)
                     logger.info(f"Converted old params: {self.params}")
                 except Exception as conv_e:
-                    logger.warning(f"Could not convert old params: {{conv_e}}")
+                    logger.warning(f"Could not convert old params: {conv_e}")
                     logger.info("Using default parameters")
                     self.params = LSTMStratParams()
 
@@ -139,15 +140,44 @@ class Agent:
         logger.info(f"Features after numeric conversion and dropna: {len(features)} bars")
 
         logger.info(f"Training LSTM model on {len(features)} bars of recent data...")
-        self.model.train(features)
+
+        # Check if we can load existing model for fine-tuning
+        model_exists = os.path.exists(self.cfg["paths"]["model_path"])
+        if model_exists:
+            try:
+                self.model.load(self.cfg["paths"]["model_path"])
+                logger.info("Loaded existing model for fine-tuning")
+                # Train with fine-tuning enabled
+                self.model.train(features, fine_tune=True)
+            except Exception as e:
+                logger.warning(f"Could not load existing model for fine-tuning: {e}")
+                logger.info("Training new model from scratch...")
+                self.model.train(features, fine_tune=False)
+        else:
+            logger.info("No existing model found, training from scratch...")
+            self.model.train(features, fine_tune=False)
+
         self.model.save(self.cfg["paths"]["model_path"])
         logger.info(f"LSTM model training complete. Saved to {self.cfg['paths']['model_path']}")
+
+        # Log model info after training
+        model_info = self.model.get_model_info()
+        logger.info(f"Model info: {model_info}")
 
         logger.info("Starting evolutionary search for strategy parameters...")
         evo = EvoSearch(self.cfg)
         best_params = evo.search(features, self.cfg, self.model)
         safe_write_json(self.cfg["paths"]["best_params"], asdict(best_params))
         logger.info(f"Saved best strategy params: {best_params}")
+
+        # Update active_config.json with optimized parameters for live trading
+        active_config_path = Path(self.cfg["paths"]["state_dir"]) / "active_config.json"
+        active_config = safe_read_json(active_config_path, {})
+        if "lstm_strategy_params" not in active_config:
+            active_config["lstm_strategy_params"] = {}
+        active_config["lstm_strategy_params"].update(asdict(best_params))
+        safe_write_json(active_config_path, active_config)
+        logger.info(f"Updated active_config.json with optimized parameters")
 
         return best_params
 
@@ -212,16 +242,22 @@ class Agent:
         logger.info("Starting live trading loop...")
         try:
             self.model.load(self.cfg["paths"]["model_path"])
-            loaded_params = safe_read_json(self.cfg["paths"]["best_params"], {})
+            # Load parameters from active_config.json as source of truth for live trading
+            active_config_path = Path(self.cfg["paths"]["state_dir"]) / "active_config.json"
+            active_config = safe_read_json(active_config_path, {})
+            loaded_params = active_config.get("lstm_strategy_params", {})
             try:
                 self.params = LSTMStratParams(**loaded_params)
+                # Force mechanical exit mode for proper trailing stop logic
+                self.params.exit_mode = 'mechanical'
             except TypeError:
                 converted_params = self._convert_old_params(loaded_params)
                 self.params = LSTMStratParams(**converted_params)
+                self.params.exit_mode = 'mechanical'
             self.trader.params = self.params
             logger.info("Successfully loaded model and parameters for live trading.")
         except Exception as e:
-            logger.error(f"Could not load model/params for live trading. Run training first. Error: {{e}}")
+            logger.error(f"Could not load model/params for live trading. Run training first. Error: {e}")
             return
 
         creds_present = all([
@@ -236,7 +272,7 @@ class Agent:
         logger.info("Fetching initial USDT balance from OKX...")
         balance_response = self.trader.get_balance(ccy='USDT')
         if not balance_response or balance_response.get("code") not in ("0", 0):
-            logger.error(f"Balance request failed: {{balance_response}}")
+            logger.error(f"Balance request failed: {balance_response}")
             return
         if not balance_response.get('data'):
             logger.error("Empty balance response data from OKX.")
@@ -244,7 +280,7 @@ class Agent:
         try:
             live_equity = float(balance_response['data'][0]['details'][0]['availBal'])
         except Exception as e:
-            logger.error(f"Could not parse live equity from balance response: {{e}}")
+            logger.error(f"Could not parse live equity from balance response: {e}")
             return
         logger.info(f"Using live available USDT balance for equity: {live_equity:.2f}")
 
@@ -262,7 +298,7 @@ class Agent:
                     else:
                         # For net mode, close the position
                         self.trader.force_close_position('net')
-                    logger.info(f"Closed existing position: {{pos}}")
+                    logger.info(f"Closed existing position: {pos}")
         else:
             logger.info("No existing positions found.")
 
@@ -273,7 +309,7 @@ class Agent:
             other_positions = [pos for pos in all_positions_response['data'] if pos.get('instId') != self.cfg["symbol"] and float(pos.get('pos', 0)) != 0]
             if other_positions:
                 for pos in other_positions:
-                    logger.info(f"Found position in other instrument: {{pos}}")
+                    logger.info(f"Found position in other instrument: {pos}")
             else:
                 logger.info("No positions in other instruments.")
         else:
@@ -299,11 +335,11 @@ class Agent:
         if not instrument_details or not instrument_details.get("data"):
             logger.error("Failed to fetch instrument details. Aborting live mode.")
             return
-        
+
         inst_data = instrument_details["data"][0]
         ct_val = float(inst_data.get("ctVal", 1))
         lot_size = float(inst_data.get("lotSz", 1))
-        logger.info(f"Instrument details: ctVal={{ct_val}}, lotSz={{lot_size}}")
+        logger.info(f"Instrument details: ctVal={ct_val}, lotSz={lot_size}")
 
         # Pass lot_size=0 to RiskManager to prevent it from rounding the base currency amount.
         # Rounding should happen on the number of contracts.
@@ -351,6 +387,34 @@ class Agent:
         balance_update_counter = 0
         BALANCE_UPDATE_INTERVAL = 10  # Update every 10 iterations
 
+        # Online learning - timeframe-based retraining
+        def parse_timeframe_to_minutes(timeframe_str):
+            """Parse OKX timeframe string to minutes.
+            Supports: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h"""
+            if timeframe_str.endswith('m'):
+                return int(timeframe_str[:-1])
+            elif timeframe_str.endswith('h'):
+                return int(timeframe_str[:-1]) * 60
+            else:
+                logger.warning(f"Unknown timeframe format: {timeframe_str}, defaulting to 15m")
+                return 15
+
+        # Calculate retraining interval based on configured timeframe
+        timeframe_minutes = parse_timeframe_to_minutes(self.cfg["timeframe"])
+        RETRAIN_INTERVAL_SECONDS = 100 * timeframe_minutes * 60  # 100 × timeframe duration
+
+        # Initialize retraining tracking
+        self.last_retrain_time = getattr(self, 'last_retrain_time', None)
+        if self.last_retrain_time is None:
+            self.last_retrain_time = datetime.now(timezone.utc)
+
+        # Load or initialize retraining history
+        retraining_history_path = Path(self.cfg["paths"]["state_dir"]) / "retraining_history.csv"
+        if retraining_history_path.exists():
+            retraining_history = pd.read_csv(retraining_history_path).to_dict('records')
+        else:
+            retraining_history = []
+
         while True:
             try:
                 msg = ws.message_queue.get(timeout=60)
@@ -371,8 +435,10 @@ class Agent:
 
                                 # Update current_positions list
                                 side_int = 1 if pos_side == 'long' else -1 if pos_side == 'short' else 0
-                                size_float = float(pos.get('pos', 0))
-                                entry_price = float(pos.get('avgPx', 0)) if 'avgPx' in pos else 0.0
+                                size_str = pos.get('pos', '0')
+                                size_float = float(size_str) if size_str else 0.0
+                                avg_px_str = pos.get('avgPx', '0') if 'avgPx' in pos else '0'
+                                entry_price = float(avg_px_str) if avg_px_str else 0.0
                                 level = next((i for i, p in enumerate(self.current_positions) if abs(p['entry_price'] - entry_price) < 1e-6 and p['side'] == side_int), len(self.current_positions))
                                 if level == len(self.current_positions):
                                     self.current_positions.append({
@@ -397,13 +463,14 @@ class Agent:
 
                                 # Log significant changes
                                 if prev_side != self.trader.current_position_side or abs(prev_size - self.trader.current_position_size) > 0.01 or prev_positions != self.trader.current_positions:
-                                    logger.info(f"Position updated from WS: side {{prev_side}}->{{self.trader.current_position_side}}, size {{prev_size:.2f}}->{{self.trader.current_position_size:.2f}}, positions count {{len(self.trader.current_positions)}}")
+                                    logger.info(f"Position updated from WS: side {prev_side}->{self.trader.current_position_side}, size {prev_size:.2f}->{self.trader.current_position_size:.2f}, positions count {len(self.trader.current_positions)}")
 
                     elif channel == 'account':
                         for acc in msg['data']:
                             if acc.get('ccy') == 'USDT':
-                                avail_bal = float(acc.get('availBal', 0))
-                                logger.info(f"Updated USDT balance from WS: {{avail_bal}}")
+                                avail_bal_str = acc.get('availBal', '0')
+                                avail_bal = float(avail_bal_str) if avail_bal_str else 0.0
+                                logger.info(f"Updated USDT balance from WS: {avail_bal}")
                     elif channel == tf_sub:
                         candle_data = msg['data'][0]
                         # Parse candle data (OKX sends as array: [ts, o, h, l, c, vol])
@@ -415,7 +482,7 @@ class Agent:
                             c = float(candle_data[4])
                             vol = float(candle_data[5])
                         else:
-                            logger.warning(f"Unexpected candle data format: {{candle_data}}")
+                            logger.warning(f"Unexpected candle data format: {candle_data}")
                             continue
                         # Create new row
                         new_row = pd.DataFrame({
@@ -432,6 +499,63 @@ class Agent:
                         hist = hist.tail(self.cfg["history_bars"])
                         # Compute features
                         features = compute_features(hist, {})
+
+                        # Time-based retraining instead of candle counting
+                        time_since_retrain = (datetime.now(timezone.utc) - self.last_retrain_time).total_seconds()
+                        if time_since_retrain >= RETRAIN_INTERVAL_SECONDS:
+                            logger.info(f"Retraining interval reached: {time_since_retrain/3600:.1f} hours (target: {RETRAIN_INTERVAL_SECONDS/3600:.1f} hours)")
+                            if len(features) >= self.model.sequence_length:
+                                logger.info("Retraining model with live data from correct timeframe...")
+
+                                # Record retraining event
+                                retrain_number = len(retraining_history) + 1
+                                retraining_history.append({
+                                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                                    'retrain_number': retrain_number,
+                                    'equity_before': live_equity,
+                                    'timeframe': self.cfg["timeframe"],
+                                    'interval_hours': RETRAIN_INTERVAL_SECONDS / 3600
+                                })
+
+                                # Prepare features for training
+                                train_features = features.copy()
+                                if 'regime' in train_features.columns:
+                                    train_features = train_features.drop('regime', axis=1)
+                                if 'prediction' in train_features.columns:
+                                    train_features = train_features.drop('prediction', axis=1)
+                                train_features = train_features.apply(pd.to_numeric, errors='coerce').dropna()
+                                if len(train_features) >= self.model.sequence_length:
+                                    # Check if we have an existing model to fine-tune
+                                    model_exists = os.path.exists(self.cfg["paths"]["model_path"])
+                                    if model_exists:
+                                        try:
+                                            self.model.load(self.cfg["paths"]["model_path"])
+                                            logger.info("Loaded existing model for live retraining")
+                                            self.model.train(train_features, fine_tune=True)
+                                        except Exception as e:
+                                            logger.warning(f"Could not load existing model for live retraining: {e}")
+                                            self.model.train(train_features, fine_tune=False)
+                                    else:
+                                        logger.info("No existing model found for live retraining, training from scratch...")
+                                        self.model.train(train_features, fine_tune=False)
+
+                                    self.model.save(self.cfg["paths"]["model_path"])
+
+                                    # Save retraining history
+                                    pd.DataFrame(retraining_history).to_csv(retraining_history_path, index=False)
+
+                                    # Update plot with retraining data
+                                    try:
+                                        from scripts.plot_backtest import plot_equity_diagnostics
+                                        plot_path = Path(self.cfg["paths"]["state_dir"]) / "backtest_plot.png"
+                                        plot_equity_diagnostics(pd.Series([live_equity], index=[pd.Timestamp.now()]), plot_path, None)
+                                        logger.info(f"Updated live performance plot with retraining #{retrain_number}")
+                                    except Exception as e:
+                                        logger.warning(f"Could not update plot: {e}")
+
+                                    logger.info(f"Model retrained and saved (#{retrain_number}). Using {len(train_features)} bars from {self.cfg['timeframe']} timeframe.")
+                            self.last_retrain_time = datetime.now(timezone.utc)
+
                         if len(features) >= self.model.sequence_length:
                                 # Manual signal check
                                 last_features = features.iloc[-1]
@@ -505,7 +629,7 @@ class Agent:
                                     entry_px = self.trader.current_positions[0]['entry_price'] if self.trader.current_positions else self.entry_px
                                     pnl = (close_price - entry_px) / entry_px if self.trader.current_position_side == 1 else (entry_px - close_price) / entry_px
                                     self.highest_profit = max(self.highest_profit, pnl)
-                                    
+
                                     prediction_val = self.model.predict(last_features.to_frame().T)
 
                                     exit_now = strategy._handle_exit_signals(
@@ -538,7 +662,7 @@ class Agent:
                     if balance_response and balance_response.get("code") in ("0", 0) and balance_response.get('data'):
                         new_equity = float(balance_response['data'][0]['details'][0]['availBal'])
                         if abs(new_equity - live_equity) > 0.01:
-                            logger.info(f"Balance updated: {{live_equity:.2f}} -> {{new_equity:.2f}}")
+                            logger.info(f"Balance updated: {live_equity:.2f} -> {new_equity:.2f}")
                             live_equity = new_equity
                             risk = RiskManager(RiskConfig.from_cfg(self.cfg["risk"]),
                                                lot_size=lot_size,
@@ -560,11 +684,11 @@ class Agent:
                         strategy = LSTMStrategy(self.params, risk, self.model, fees=self.cfg["fees"])
                         logger.info("Re-optimization complete.")
                     except Exception as e:
-                        logger.error(f"Re-optimization failed: {{e}}")
+                        logger.error(f"Re-optimization failed: {e}")
                 time.sleep(1)
             except KeyboardInterrupt:
                 logger.info("Keyboard interrupt received. Shutting down live loop.")
                 break
             except Exception as e:
-                logger.error(f"Error in live loop: {{e}}")
+                logger.error(f"Error in live loop: {e}")
                 time.sleep(5)
