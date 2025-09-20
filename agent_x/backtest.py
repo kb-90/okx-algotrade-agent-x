@@ -28,12 +28,20 @@ def compute_metrics(equity: pd.Series) -> dict:
     drawdown = (equity - roll_max) / roll_max
     max_dd = drawdown.min()
 
+    # Underwater metrics
+    underwater_mask = equity < roll_max
+    total_underwater_loss = ((roll_max - equity) * underwater_mask).sum()
+    underwater_bars = underwater_mask.sum()
+
     metrics.update({
         "CAGR": float(cagr),
         "Sharpe": float(sharpe),
         "MaxDD": float(abs(max_dd)),
         "Final": float(equity.iloc[-1]),
-        "Start": float(equity.iloc[0])
+        "Start": float(equity.iloc[0]),
+        "TotalUnderwaterLoss": float(total_underwater_loss),
+        "UnderwaterBars": int(underwater_bars),
+        "TotalBars": len(equity)
     })
     return metrics
 
