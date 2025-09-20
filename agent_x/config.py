@@ -12,17 +12,17 @@ def load_config():
         "api_secret": os.getenv("OKX_API_SECRET", ""),
         "passphrase": os.getenv("OKX_PASSPHRASE", ""),
         "symbol": "XRP-USDT-SWAP",
-        "timeframe": "3m",
+        "timeframe": "15m",
         "tdMode": "isolated",
         "posMode": "long_short_mode",
         "data_source": "okx",
         "fees": 0.0005,
         "slippage": 0.0001,
-        "history_bars": 5000,
+        "history_bars": 100000,
         
         "walk_forward": {
-            "train_bars": 3000,
-            "test_bars": 2000,
+            "train_bars": 50000,
+            "test_bars": 25000,
             "pop": 30,
             "gens": 12,
             "topk": 6
@@ -56,33 +56,33 @@ def load_config():
         
         "risk": {
             "max_open_orders": 2, # Maximum number of open orders allowed - Should this be 3 or 3.0?
-            "leverage": 4, # Increased leverage for higher returns
+            "leverage": 3, # Increased leverage for higher returns
             "backtest_equity": 30.0, # Used for backtesting and walk-forward analysis
-            "max_daily_loss": 0.2, # Tighter daily loss limit
-            "max_exposure": 0.8, # Lower exposure to control risk
-            "risk_per_trade": 0.4 # Increased risk per trade for more position size
+            "max_daily_loss": 0.15, # Tighter daily loss limit
+            "max_exposure": 0.9, # Lower exposure to control risk
+            "risk_per_trade": 0.6 # Increased risk per trade for more position size
         },
         
         "lstm_params": {
-            "sequence_length": 64,
-            "epochs": 48,
-            "batch_size": 48,
-            "future_bars": 10
+            "sequence_length": 100,
+            "epochs": 66,
+            "batch_size": 66,
+            "future_bars": 21
         },
         
         "lstm_strategy_params": {
             "indicator_weights": {
-                "rsi": 0.4,
-                "macd": 0.3,
+                "rsi": 0.3,
+                "macd": 0.4,
                 "bb": 0.3
             },
             "exit_mode": "intelligent",
-            "atr_mult_sl": 3.1,
-            "initial_trail_pct": 0.06,
-            "profit_trigger_pct": 0.035,
-            "tighter_trail_pct": 0.01,
-            "lstm_disagreement_pct": 0.009,
-            "prediction_threshold": 0.006
+            "atr_mult_sl": 2.75,
+            "initial_trail_pct": 0.05,
+            "profit_trigger_pct": 0.06,
+            "tighter_trail_pct": 0.02,
+            "lstm_disagreement_pct": 0.007,
+            "prediction_threshold": 0.00175
         }
     }
 
@@ -130,11 +130,11 @@ def get_ultra_aggressive_params():
 
     return LSTMStratParams(
         prediction_threshold=0.0008,  # More aggressive threshold
-        indicator_weights={'rsi': 0.45, 'macd': 0.35, 'bb': 0.2},  # Favor momentum more
+        indicator_weights={'rsi': 0.3, 'macd': 0.4, 'bb': 0.3},  # Favor momentum more
         exit_mode='mechanical',
         atr_mult_sl=1.8,  # Even tighter stops
         initial_trail_pct=0.04,  # 4% trailing
-        profit_trigger_pct=0.025,  # 2.5% profit target
+        profit_trigger_pct=0.03,  # 2.5% profit target
         lstm_disagreement_pct=0.008  # Slightly less strict disagreement
     )
 
@@ -146,7 +146,7 @@ def load_config_for_small_cap(starting_capital: float = 25.0):
     cfg["risk"]["backtest_equity"] = starting_capital
     cfg["risk"]["account_equity"] = starting_capital
     cfg["risk"]["risk_per_trade"] = 0.45  # Slightly higher risk per trade for small capital
-    cfg["risk"]["max_daily_loss"] = 0.12  # Slightly looser daily loss limit
+    cfg["risk"]["max_daily_loss"] = 0.125  # Slightly looser daily loss limit
 
     # Adjust scaling thresholds for small capital
     cfg["scaling"]["thresholds"] = [0.008, 0.018]  # Lower thresholds for more frequent scaling
@@ -156,12 +156,12 @@ def load_config_for_small_cap(starting_capital: float = 25.0):
     from .strategy import LSTMStratParams
     cfg["lstm_params"] = LSTMStratParams(
         prediction_threshold=0.0015,  # More aggressive threshold
-        indicator_weights={'rsi': 0.4, 'macd': 0.4, 'bb': 0.2},
+        indicator_weights={'rsi': 0.4, 'macd': 0.3, 'bb': 0.3},
         exit_mode='mechanical',
-        atr_mult_sl=2.5,
+        atr_mult_sl=2.75,
         initial_trail_pct=0.045,
-        profit_trigger_pct=0.055,
-        lstm_disagreement_pct=0.006
+        profit_trigger_pct=0.05,
+        lstm_disagreement_pct=0.008
     )
 
     return cfg
