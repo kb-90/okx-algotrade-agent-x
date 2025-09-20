@@ -32,7 +32,8 @@ def safe_read_json(path, default):
     except: return default
 
 def safe_write_json(path, obj):
-    tmp = path+".tmp"
+    path = Path(path)
+    tmp = path.with_suffix('.tmp')
     with open(tmp,"w") as f: json.dump(obj,f,indent=2)
     os.replace(tmp,path)
     
