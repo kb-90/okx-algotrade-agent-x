@@ -7,7 +7,7 @@ from .model import LSTMModel
 from .utils import logger
 import json
 from pathlib import Path
-
+ 
 @dataclass
 class LSTMStratParams:
     prediction_threshold: float = 0.005  # Lowered for more entries
