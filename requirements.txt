@@ -12,3 +12,4 @@ python-dotenv
 matplotlib
 websocket-client
 python-okx
+playsound
