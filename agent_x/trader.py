@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import datetime
 import threading
 from typing import Optional, Dict, Any
-
+ 
 try:
     import ccxt
     CCXT_AVAILABLE = True
@@ -27,6 +27,7 @@ class OKXTrader:
         self.symbol = cfg["symbol"]
         self.tdMode = cfg.get("tdMode", "cross")
         self.is_demo = cfg.get("runtime", {}).get("demo", True)
+        self.fees = self.cfg.get("fees", 0.0005)
 
         if self.is_demo:
             # Demo mode: use OKX REST API with x-simulated-trading header
@@ -461,6 +462,12 @@ try:
     CCXT_AVAILABLE = True
 except ImportError:
     CCXT_AVAILABLE = False
+
+try:
+    from playsound import playsound
+    PLAYSOUND_AVAILABLE = True
+except ImportError:
+    PLAYSOUND_AVAILABLE = False
 
 # Use a lock to prevent race conditions when writing to the trade history file
 _trade_history_lock = threading.Lock()
@@ -897,10 +904,6 @@ class OKXTrader:
                 if write_header:
                     writer.writerow(['ts', 'event', 'side', 'size', 'price', 'pnl', 'fees'])
                 ts = record.get('ts')
-                if hasattr(ts, 'isoformat'):
-                    ts = ts.isoformat()
-                writer.writerow([ts, record.get('event'), record.get('side'), record.get('size'), record.get('price'), record.get('pnl'), record.get('fees')])
-
                 if hasattr(ts, 'isoformat'):
                     ts = ts.isoformat()
                 writer.writerow([ts, record.get('event'), record.get('side'), record.get('size'), record.get('price'), record.get('pnl'), record.get('fees')])
