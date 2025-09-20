@@ -68,14 +68,28 @@ class LSTMModel:
         self.model = None
         self.feature_columns = None
 
-    def train(self, df_features: pd.DataFrame):
+    def train(self, df_features: pd.DataFrame, fine_tune: bool = True):
         self.feature_columns = df_features.columns.tolist()
         scaled_data = self.scaler.fit_transform(df_features.values)
         X_train, y_train = create_training_dataset(scaled_data, self.sequence_length, self.future_bars)
         if X_train.shape[0] == 0:
             raise ValueError("Not enough data to create a single training sequence.")
-        self.model = build_lstm_model(input_shape=(X_train.shape[1], X_train.shape[2]))
-        self.model.fit(X_train, y_train, epochs=self.epochs, batch_size=self.batch_size, verbose=0)
+
+        # Check if we have an existing model to fine-tune
+        if self.model is not None and fine_tune:
+            logger.info("Fine-tuning existing model with new data...")
+            # Use a smaller learning rate for fine-tuning to avoid catastrophic forgetting
+            from tensorflow.keras.optimizers import Adam
+            current_lr = self.model.optimizer.learning_rate.numpy() if hasattr(self.model.optimizer, 'learning_rate') else 0.001
+            fine_tune_lr = current_lr * 0.1  # Reduce learning rate for fine-tuning
+            self.model.optimizer.learning_rate.assign(fine_tune_lr)
+            self.model.fit(X_train, y_train, epochs=self.epochs, batch_size=self.batch_size, verbose=0)
+            logger.info("Model fine-tuning complete.")
+        else:
+            logger.info("Training new model from scratch...")
+            self.model = build_lstm_model(input_shape=(X_train.shape[1], X_train.shape[2]))
+            self.model.fit(X_train, y_train, epochs=self.epochs, batch_size=self.batch_size, verbose=0)
+            logger.info("New model training complete.")
 
     def predict(self, df_features: pd.DataFrame) -> float:
         if self.model is None: raise RuntimeError("Model not trained.")
@@ -120,9 +134,15 @@ class LSTMModel:
 
     def load(self, model_path: str):
         from tensorflow.keras.models import load_model
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+
         self.model = load_model(model_path)
         scaler_path = os.path.splitext(model_path)[0] + '_scaler.gz'
-        self.scaler = joblib.load(scaler_path)
+        if os.path.exists(scaler_path):
+            self.scaler = joblib.load(scaler_path)
+        else:
+            logger.warning(f"Scaler file not found: {scaler_path}. Scaler will need to be re-fit.")
 
         columns_path = os.path.splitext(model_path)[0] + '_columns.json'
         try:
@@ -131,3 +151,20 @@ class LSTMModel:
         except FileNotFoundError:
             self.feature_columns = None
             logger.warning("Feature columns file not found. Model may not work correctly if feature set has changed.")
+
+    def is_trained(self) -> bool:
+        """Check if the model has been trained or loaded."""
+        return self.model is not None
+
+    def get_model_info(self) -> dict:
+        """Get information about the current model state."""
+        if self.model is None:
+            return {"status": "not_trained"}
+
+        return {
+            "status": "trained",
+            "input_shape": self.model.input_shape,
+            "output_shape": self.model.output_shape,
+            "feature_columns": self.feature_columns,
+            "scaler_fitted": self.scaler.min is not None
+        }
