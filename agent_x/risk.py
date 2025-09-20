@@ -12,7 +12,7 @@ class RiskConfig:
     max_exposure: float
     risk_per_trade: float
     max_open_orders: int = 1
-
+ 
     @classmethod
     def from_cfg(cls, cfg: dict):
         valid_keys = {
