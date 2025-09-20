@@ -136,7 +136,15 @@ class EvoSearch:
         if abs(final_equity - start_equity) < 0.001:
             return -1e6
 
-        return final_equity
+        total_underwater_loss = metrics.get("TotalUnderwaterLoss", 0.0)
+        underwater_bars = metrics.get("UnderwaterBars", 0)
+        total_bars = metrics.get("TotalBars", 1000)  # fallback
+        normalized_underwater = (total_underwater_loss / start_equity) + 0.1 * (underwater_bars / total_bars)
+
+        # 75% profit, 25% underwater penalty
+        score = 0.75 * final_equity - 0.25 * normalized_underwater * start_equity
+
+        return score
 
     # NEW: cache predictions once and reuse in search()
     def _attach_cached_predictions(self, features: pd.DataFrame, model) -> pd.DataFrame:
