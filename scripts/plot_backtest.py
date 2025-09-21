@@ -19,7 +19,9 @@ except Exception as e:
     print(f"An error occurred during import: {e}")
     traceback.print_exc()
     sys.exit(1)
-
+ 
+#   is the data being learned by the model being accumulated correctly? or is it being overwritten with each training run?
+#   also, is the learned data from the training runs being used correctly in the live trading runs??
 
 def load_equity(path: Path) -> pd.Series:
     df = pd.read_csv(path)
