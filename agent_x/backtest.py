@@ -28,7 +28,8 @@ def compute_metrics(equity: pd.Series) -> dict:
     drawdown = (equity - roll_max) / roll_max
     max_dd = drawdown.min()
 
-    # Underwater metrics
+    # Underwater metrics don't make sense! At the end of the training we see "UnderwaterBars": 9414, with  "TotalBars": 10000 and "TotalUnderwaterLoss": 10201.564961588712,
+    # yet somehow we see this as well which is contradicory: "Start": 30.0,  "Final": 64.90551200911226, "MaxDD": 0.18754086372580864, "Sharpe": 0.4958241120556928, "CAGR": 14.006652800791437,
     underwater_mask = equity < roll_max
     total_underwater_loss = ((roll_max - equity) * underwater_mask).sum()
     underwater_bars = underwater_mask.sum()
