@@ -12,17 +12,17 @@ def load_config():
         "api_secret": os.getenv("OKX_API_SECRET", ""),
         "passphrase": os.getenv("OKX_PASSPHRASE", ""),
         "symbol": "XRP-USDT-SWAP",
-        "timeframe": "15m",
+        "timeframe": "5m",
         "tdMode": "isolated",
         "posMode": "long_short_mode",
         "data_source": "okx",
         "fees": 0.0005,
         "slippage": 0.0001,
-        "history_bars": 100000,
+        "history_bars": 11000,
         
         "walk_forward": {
-            "train_bars": 50000,
-            "test_bars": 25000,
+            "train_bars": 10000,
+            "test_bars": 1000,
             "pop": 30,
             "gens": 12,
             "topk": 6
@@ -56,11 +56,11 @@ def load_config():
         
         "risk": {
             "max_open_orders": 2, # Maximum number of open orders allowed - Should this be 3 or 3.0?
-            "leverage": 3, # Increased leverage for higher returns
+            "leverage": 4, # Increased leverage for higher returns
             "backtest_equity": 30.0, # Used for backtesting and walk-forward analysis
             "max_daily_loss": 0.15, # Tighter daily loss limit
             "max_exposure": 0.9, # Lower exposure to control risk
-            "risk_per_trade": 0.6 # Increased risk per trade for more position size
+            "risk_per_trade": 0.4 # Increased risk per trade for more position size
         },
         
         "lstm_params": {
@@ -78,8 +78,8 @@ def load_config():
             },
             "exit_mode": "intelligent",
             "atr_mult_sl": 2.75,
-            "initial_trail_pct": 0.05,
-            "profit_trigger_pct": 0.06,
+            "initial_trail_pct": 0.06,
+            "profit_trigger_pct": 0.04,
             "tighter_trail_pct": 0.02,
             "lstm_disagreement_pct": 0.007,
             "prediction_threshold": 0.00175
@@ -153,16 +153,16 @@ def load_config_for_small_cap(starting_capital: float = 25.0):
     cfg["scaling"]["position_ratios"] = [1.0, 0.6, 0.3]  # Adjusted position ratios for better scaling
 
     # Adjust LSTM strategy parameters for small capital
-    from .strategy import LSTMStratParams
-    cfg["lstm_params"] = LSTMStratParams(
-        prediction_threshold=0.0015,  # More aggressive threshold
-        indicator_weights={'rsi': 0.4, 'macd': 0.3, 'bb': 0.3},
-        exit_mode='mechanical',
-        atr_mult_sl=2.75,
-        initial_trail_pct=0.045,
-        profit_trigger_pct=0.05,
-        lstm_disagreement_pct=0.008
-    )
+    # Keep as dictionary to match config structure
+    cfg["lstm_strategy_params"] = {
+        "prediction_threshold": 0.0015,  # More aggressive threshold
+        "indicator_weights": {'rsi': 0.4, 'macd': 0.3, 'bb': 0.3},
+        "exit_mode": 'mechanical',
+        "atr_mult_sl": 2.75,
+        "initial_trail_pct": 0.045,
+        "profit_trigger_pct": 0.05,
+        "lstm_disagreement_pct": 0.008
+    }
 
     return cfg
 
