@@ -296,8 +296,7 @@ class Agent:
                     elif pos_side == 'short':
                         self.trader.force_close_position('short')
                     else:
-                        # For net mode, close the position
-                        self.trader.force_close_position('net')
+                        self.trader.force_close_position('net')  # For net mode, close the position
                     logger.info(f"Closed existing position: {pos}")
         else:
             logger.info("No existing positions found.")
