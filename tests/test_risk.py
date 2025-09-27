@@ -3,7 +3,7 @@ import pandas as pd
 from agent_x.risk import RiskConfig, RiskManager
 
 def test_position_and_circuit():
-    cfg = RiskConfig(backtest_equity=50, vol_target=0.15, max_leverage=2, max_daily_loss=0.1, max_exposure=0.9, risk_per_trade=0.1)
+    cfg = RiskConfig(backtest_equity=50, leverage=2, max_daily_loss=0.1, max_exposure=0.9, risk_per_trade=0.1)
     r = RiskManager(cfg, lot_size=0.1)
 
     # Test position sizing for initial position
@@ -11,7 +11,8 @@ def test_position_and_circuit():
     df = pd.DataFrame({
         'close': [100] * 20,
         'high': [101] * 20,
-        'low': [99] * 20
+        'low': [99] * 20,
+        'atr': [1.0] * 20  # Add ATR column for risk calculation
     })
     sz = r.get_position_size(df, 1, 100, position_level=0)
     assert sz > 0
@@ -23,9 +24,9 @@ def test_position_and_circuit():
     assert sz_scale1 < sz  # Scaling positions should be smaller
     assert sz_scale2 < sz_scale1  # Each scaling level should be smaller
 
-    # Test with no ATR
+    # Test with no ATR (should return 0 due to no ATR available)
     df_no_atr = pd.DataFrame({'close': [100]})
     sz_no_atr = r.get_position_size(df_no_atr, 1, 100, position_level=0)
-    assert sz_no_atr > 0
+    assert sz_no_atr == 0  # Should return 0 when no ATR is available
 
 # - Additional tests can be added here for other indicators as needed.
