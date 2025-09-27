@@ -75,11 +75,13 @@ class OKXData(DataInterface):
         
         if not all_data:
             raise RuntimeError("Failed to fetch any historical data from OKX.")
-        
+
         full_df = pd.concat(all_data).sort_index()
         full_df = full_df[~full_df.index.duplicated(keep="first")]
-        logger.info(f"Successfully fetched a total of {len(full_df)} unique bars.")
-        return full_df.tail(limit)
+        if len(full_df) > limit:
+            full_df = full_df.tail(limit)
+        logger.info(f"Successfully fetched exactly {len(full_df)} unique bars.")
+        return full_df
 
 class CCXTData(DataInterface):
     def __init__(self, cfg: Dict):
