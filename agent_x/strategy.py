@@ -10,7 +10,7 @@ from pathlib import Path
  
 @dataclass
 class LSTMStratParams:
-    prediction_threshold: float = 0.005  # Lowered for more entries
+    prediction_threshold: float = 0.003  # Lowered for more entries, set to 0.3% as requested
     indicator_weights: dict = field(default_factory=lambda: {'rsi': 0.400008272490776, 'macd': 0.36285517542429074, 'bb': 0.2371365520849334})  # Updated to best_params
     exit_mode: str = 'mechanical'  # 'mechanical' or 'intelligent'
     atr_mult_sl: float = 3.0  # Lowered for tighter stops
@@ -19,7 +19,6 @@ class LSTMStratParams:
     tighter_trail_pct: float = 0.01  # Updated to best_params
     lstm_disagreement_pct: float = 0.03  # Updated to best_params
     future_bars: int = 9  # From config, updated to best_params
-    vol_target: float = 0.7  # From risk config, updated to best_params
     max_daily_loss: float = 0.15  # From risk config, updated to best_params
     max_exposure: float = 0.7  # From risk config, updated to best_params
     risk_per_trade: float = 0.25  # From risk config, updated to best_params
@@ -50,7 +49,6 @@ class LSTMStratParams:
                 self.tighter_trail_pct = best_params.get('tighter_trail_pct', self.tighter_trail_pct)
                 self.lstm_disagreement_pct = best_params.get('lstm_disagreement_pct', self.lstm_disagreement_pct)
                 self.future_bars = best_params.get('future_bars', self.future_bars)
-                self.vol_target = best_params.get('vol_target', self.vol_target)
                 self.max_daily_loss = best_params.get('max_daily_loss', self.max_daily_loss)
                 self.max_exposure = best_params.get('max_exposure', self.max_exposure)
                 self.risk_per_trade = best_params.get('risk_per_trade', self.risk_per_trade)
@@ -61,7 +59,7 @@ class LSTMStratParams:
 
         # Coerce/keep provided values, fill sensible defaults if falsy/invalid
         self.indicator_weights = self.indicator_weights or {'rsi': 0.400008272490776, 'macd': 0.36285517542429074, 'bb': 0.2371365520849334}
-        self.prediction_threshold = _f(self.prediction_threshold, 0.002)
+        self.prediction_threshold = _f(self.prediction_threshold, 0.003)  # Updated default to 0.3%
         self.exit_mode = self.exit_mode or 'intelligent'
         self.atr_mult_sl = _f(self.atr_mult_sl, 3.0)
         self.initial_trail_pct = _f(self.initial_trail_pct, 0.05)
@@ -69,7 +67,6 @@ class LSTMStratParams:
         self.tighter_trail_pct = _f(self.tighter_trail_pct, 0.01)
         self.lstm_disagreement_pct = _f(self.lstm_disagreement_pct, 0.015)
         self.future_bars = int(self.future_bars) if self.future_bars else 9
-        self.vol_target = _f(self.vol_target, 0.7)
         self.max_daily_loss = _f(self.max_daily_loss, 0.15)
         self.max_exposure = _f(self.max_exposure, 0.7)
         self.risk_per_trade = _f(self.risk_per_trade, 0.25)
@@ -157,9 +154,17 @@ class LSTMStrategy:
         exit_now = False
 
         if self.params.exit_mode == 'mechanical':
-            if 'atr' in dfc and not np.isnan(dfc['atr']):
-                atr = float(dfc['atr'])
-                if atr > 0 and entry_px > 0:
+            atr = None
+            if 'atr' in dfc:
+                atr_value = dfc['atr']
+                # Convert to scalar if it's a Series
+                if hasattr(atr_value, 'iloc'):
+                    atr_value = atr_value.iloc[0] if len(atr_value) > 0 else None
+                # Check if valid
+                if atr_value is not None and not pd.isna(atr_value):
+                    atr = float(atr_value)
+
+                if atr and atr > 0 and entry_px > 0:
                     atr_stop = (self.params.atr_mult_sl * atr) / entry_px
                     if pnl < -abs(atr_stop):
                         logger.debug(f"ATR stop exit - PnL: {pnl:.4f}, ATR stop: {atr_stop:.4f}")
@@ -174,8 +179,10 @@ class LSTMStrategy:
                     logger.debug(f"Tighter trail exit - PnL: {pnl:.4f}, Highest: {highest_profit:.4f}")
                     exit_now = True
             elif highest_profit >= self.params.initial_trail_pct:
-                if pnl < highest_profit - self.params.initial_trail_pct:
-                    logger.debug(f"Initial trail exit - PnL: {pnl:.4f}, Highest: {highest_profit:.4f}")
+                # Calculate the trail level: highest profit minus trail percentage
+                trail_level = highest_profit - self.params.initial_trail_pct
+                if pnl < trail_level:
+                    logger.debug(f"Initial trail exit - PnL: {pnl:.4f}, Highest: {highest_profit:.4f}, Trail level: {trail_level:.4f}")
                     exit_now = True
 
         elif self.params.exit_mode == 'intelligent':
