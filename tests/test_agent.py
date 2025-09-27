@@ -13,7 +13,7 @@ class DummyLSTMModel:
     def __init__(self, **kwargs):
         self.sequence_length = 60
 
-    def train(self, df_features):
+    def train(self, df_features, fine_tune=False):
         pass
 
     def save(self, path):
@@ -22,6 +22,9 @@ class DummyLSTMModel:
 
     def load(self, path):
         pass
+
+    def get_model_info(self):
+        return "Dummy model info"
 
     def predict_sequence(self, df_features):
         return df_features['close'].values[self.sequence_length-1:] * 1.02
@@ -34,7 +37,7 @@ def test_agent_run_once(monkeypatch, tmp_path):
         "symbol": "BTC-USDT-SWAP", "timeframe": "1h", "history_bars": 200,
         "fees": 0.001, "slippage": 0.001,
         "risk": {
-            "vol_target": 0.1, "max_leverage": 2,
+            "vol_target": 0.1, "leverage": 2,
             "max_daily_loss": 0.2, "max_exposure": 0.9, "risk_per_trade": 0.1,
             "backtest_equity": 50
         },
