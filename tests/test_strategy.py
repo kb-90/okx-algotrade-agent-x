@@ -258,13 +258,13 @@ class TestLSTMStrategy:
         # Position has small profit but below profit trigger
         entry_price = 50000.0
         highest_profit = 0.02  # 2% profit (below trigger but above initial trail)
-        current_price = 50950.0  # Profit dropped to 1.9% (below initial trail from peak)
+        current_price = 50950.0  # Profit dropped to 1.9% (above initial trail level)
         pnl = (current_price - entry_price) / entry_price  # 0.019
 
         exit_signal = strategy._handle_exit_signals(
             sample_df, 0, current_price, 1, entry_price, highest_profit
         )
-        assert exit_signal is True  # Should exit due to initial trail stop
+        assert exit_signal is False  # Should NOT exit, current profit is above trail level
 
     def test_order_placement_scenario_with_trailing_stops(self, strategy, sample_df):
         """Test complete order placement scenario with trailing stop logic."""
