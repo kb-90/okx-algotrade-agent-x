@@ -12,6 +12,13 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
+from rich.live import Live
+from rich.panel import Panel
+from rich.console import Console
+from rich.table import Table
+from rich.text import Text
+from rich.layout import Layout
+
 from .utils import safe_read_json, safe_write_json, logger
 from .data import OKXData, CCXTData, DataInterface
 from .indicators import compute_features
@@ -74,6 +81,95 @@ class Agent:
         self.position_levels = 0
         self.current_positions = []
         self.last_scale_time = None
+
+        # Dashboard tracking variables
+        self.last_signal = 0.0
+        self.last_prediction = 0.0
+        self.last_order = None  # {'side': str, 'size': float, 'price': float, 'time': datetime}
+        self.current_price = 0.0
+        self.last_indicator_signal = 0.0
+        self.live_equity = 0.0
+        self.margin_used = 0.0
+        self.last_retrain_time = None
+
+    def render_dashboard(self) -> Panel:
+        """Render the live trading dashboard using Rich."""
+        table = Table(title="Live Trading Dashboard", show_header=True, header_style="bold magenta")
+        table.add_column("Metric", style="cyan", no_wrap=True)
+        table.add_column("Value", style="white")
+
+        # Position Status
+        pos_side = "None"
+        pos_color = "white"
+        if self.trader.current_position_side == 1:
+            pos_side = "Long"
+            pos_color = "green"
+        elif self.trader.current_position_side == -1:
+            pos_side = "Short"
+            pos_color = "red"
+        table.add_row("Position", Text(pos_side, style=pos_color))
+
+        # Position Size
+        size_str = f"{self.trader.current_position_size:.2f}" if self.trader.current_position_size > 0 else "0.00"
+        table.add_row("Size", size_str)
+
+        # Levels
+        levels_str = f"{self.position_levels} levels"
+        table.add_row("Levels", levels_str)
+
+        # Current Price
+        price_str = f"{self.current_price:.4f}" if self.current_price > 0 else "N/A"
+        table.add_row("Current Price", price_str)
+
+        # P&L
+        pnl = 0.0
+        if self.trader.current_position_side != 0 and self.current_positions:
+            entry_px = self.current_positions[0]['entry_price']
+            pnl = (self.current_price - entry_px) / entry_px if self.trader.current_position_side == 1 else (entry_px - self.current_price) / entry_px
+        pnl_color = "green" if pnl > 0 else "red" if pnl < 0 else "white"
+        pnl_str = f"{pnl:.2%}"
+        table.add_row("Unrealized P&L", Text(pnl_str, style=pnl_color))
+
+        # Highest Profit
+        high_pnl_str = f"{self.highest_profit:.2%}"
+        table.add_row("Highest Profit", high_pnl_str)
+
+        # Equity
+        equity_str = f"{self.live_equity:.2f} USDT"
+        table.add_row("Equity", equity_str)
+
+        # Last Prediction
+        pred_str = f"{self.last_prediction:.4f}"
+        table.add_row("Last Prediction", pred_str)
+
+        # Last Indicator Signal
+        ind_str = f"{self.last_indicator_signal:.4f}"
+        table.add_row("Last Indicator", ind_str)
+
+        # Last Signal
+        signal_str = f"{self.last_signal:.0f}"
+        table.add_row("Last Signal", signal_str)
+
+        # Last Order
+        order_str = "None"
+        if self.last_order:
+            order_str = f"{self.last_order['side'].upper()} {self.last_order['size']:.2f} @ {self.last_order['price']:.4f}"
+        table.add_row("Last Order", order_str)
+
+        # Last Retrain
+        retrain_str = "Never"
+        if self.last_retrain_time:
+            retrain_str = self.last_retrain_time.strftime("%Y-%m-%d %H:%M:%S UTC")
+        table.add_row("Last Retrain", retrain_str)
+
+        # Strategy Params
+        thresh_str = f"{self.params.prediction_threshold:.4f}"
+        table.add_row("Prediction Threshold", thresh_str)
+
+        exit_mode_str = self.params.exit_mode
+        table.add_row("Exit Mode", exit_mode_str)
+
+        return Panel(table, title="Agent X Live Dashboard", border_style="blue")
 
     def _create_data_interface(self, cfg: Dict, api_client: api_client.OKXAPIClient = None) -> DataInterface:
         """Create the appropriate data interface based on configuration."""
@@ -255,6 +351,11 @@ class Agent:
                 self.params = LSTMStratParams(**converted_params)
                 self.params.exit_mode = 'mechanical'
             self.trader.params = self.params
+
+            # Initialize _last_reopt if not set (prevents immediate re-optimization)
+            if self._last_reopt is None:
+                self._last_reopt = datetime.now(timezone.utc)
+
             logger.info("Successfully loaded model and parameters for live trading.")
         except Exception as e:
             logger.error(f"Could not load model/params for live trading. Run training first. Error: {e}")
@@ -284,24 +385,7 @@ class Agent:
             return
         logger.info(f"Using live available USDT balance for equity: {live_equity:.2f}")
 
-        # Close any existing positions
-        logger.info("Checking for existing positions to close...")
-        position_response = self.trader.get_position()
-        if position_response and position_response.get('code') == '0' and position_response.get('data'):
-            for pos in position_response['data']:
-                if pos.get('instId') == self.cfg["symbol"] and float(pos.get('pos', 0)) != 0:
-                    pos_side = pos.get('posSide', 'net')
-                    if pos_side == 'long':
-                        self.trader.force_close_position('long')
-                    elif pos_side == 'short':
-                        self.trader.force_close_position('short')
-                    else:
-                        self.trader.force_close_position('net')  # For net mode, close the position
-                    logger.info(f"Closed existing position: {pos}")
-        else:
-            logger.info("No existing positions found.")
-
-        # Check for positions in other instruments
+        # Check for positions in other instruments (keep for awareness, but don't close own symbol)
         logger.info("Checking for positions in other instruments...")
         all_positions_response = self.trader.get_position(instId=None)
         if all_positions_response and all_positions_response.get('code') == '0' and all_positions_response.get('data'):
@@ -414,280 +498,312 @@ class Agent:
         else:
             retraining_history = []
 
-        while True:
+        # Initialize Live dashboard
+        console = Console()
+        running = True
+        with Live(console=console, refresh_per_second=1) as live:
             try:
-                msg = ws.message_queue.get(timeout=60)
-                # Process WebSocket message
-                if msg.get('event') == 'subscribe':
-                    logger.info("WebSocket subscribed successfully.")
-                    continue
-                if 'data' in msg and msg['data']:
-                    arg = msg.get('arg', {})
-                    channel = arg.get('channel')
-                    if channel == 'positions':
-                        for pos in msg['data']:
-                            if pos.get('instId') == sym:
-                                pos_side = pos.get('posSide', 'net')
-                                prev_positions = self.trader.current_positions.copy()
-                                prev_side = self.trader.current_position_side
-                                prev_size = self.trader.current_position_size
-
-                                # Update current_positions list
-                                side_int = 1 if pos_side == 'long' else -1 if pos_side == 'short' else 0
-                                size_str = pos.get('pos', '0')
-                                size_float = float(size_str) if size_str else 0.0
-                                avg_px_str = pos.get('avgPx', '0') if 'avgPx' in pos else '0'
-                                entry_price = float(avg_px_str) if avg_px_str else 0.0
-                                level = next((i for i, p in enumerate(self.current_positions) if abs(p['entry_price'] - entry_price) < 1e-6 and p['side'] == side_int), len(self.current_positions))
-                                if level == len(self.current_positions):
-                                    self.current_positions.append({
-                                        'side': side_int,
-                                        'size': size_float,
-                                        'entry_price': entry_price,
-                                        'level': level,
-                                        'entry_time': datetime.utcnow()  # Approximate
-                                    })
-                                else:
-                                    self.current_positions[level]['size'] = size_float
-
-                                # Update backward compatible fields
-                                total_size = sum(p['size'] for p in self.current_positions)
-                                if self.current_positions:
-                                    avg_side = max(set(p['side'] for p in self.current_positions), key=lambda s: sum(p['size'] for p in self.current_positions if p['side'] == s))
-                                else:
-                                    avg_side = 0
-                                self.trader.current_position_side = avg_side
-                                self.trader.current_position_size = total_size
-                                self.position_levels = len(self.current_positions)
-
-                                # Log significant changes
-                                if prev_side != self.trader.current_position_side or abs(prev_size - self.trader.current_position_size) > 0.01 or prev_positions != self.trader.current_positions:
-                                    logger.info(f"Position updated from WS: side {prev_side}->{self.trader.current_position_side}, size {prev_size:.2f}->{self.trader.current_position_size:.2f}, positions count {len(self.trader.current_positions)}")
-
-                    elif channel == 'account':
-                        for acc in msg['data']:
-                            if acc.get('ccy') == 'USDT':
-                                avail_bal_str = acc.get('availBal', '0')
-                                avail_bal = float(avail_bal_str) if avail_bal_str else 0.0
-                                logger.info(f"Updated USDT balance from WS: {avail_bal}")
-                    elif channel == tf_sub:
-                        candle_data = msg['data'][0]
-                        # Parse candle data (OKX sends as array: [ts, o, h, l, c, vol])
-                        if isinstance(candle_data, list) and len(candle_data) >= 6:
-                            ts = int(candle_data[0])
-                            o = float(candle_data[1])
-                            h = float(candle_data[2])
-                            l = float(candle_data[3])
-                            c = float(candle_data[4])
-                            vol = float(candle_data[5])
-                        else:
-                            logger.warning(f"Unexpected candle data format: {candle_data}")
+                while running:
+                    try:
+                        msg = ws.message_queue.get(timeout=60)
+                        # Process WebSocket message
+                        if msg.get('event') == 'subscribe':
+                            logger.info("WebSocket subscribed successfully.")
+                            live.update(self.render_dashboard())
                             continue
-                        # Create new row
-                        new_row = pd.DataFrame({
-                            'timestamp': [pd.to_datetime(ts, unit='ms', utc=True)],
-                            'open': [o],
-                            'high': [h],
-                            'low': [l],
-                            'close': [c],
-                            'volume': [vol]
-                        })
-                        # Append to historical data
-                        hist = pd.concat([hist, new_row], ignore_index=True)
-                        # Keep only recent bars
-                        hist = hist.tail(self.cfg["history_bars"])
-                        # Compute features
-                        features = compute_features(hist, {})
+                        if 'data' in msg and msg['data']:
+                            arg = msg.get('arg', {})
+                            channel = arg.get('channel')
+                            if channel == 'positions':
+                                for pos in msg['data']:
+                                    if pos.get('instId') == sym:
+                                        pos_side = pos.get('posSide', 'net')
+                                        prev_positions = self.trader.current_positions.copy()
+                                        prev_side = self.trader.current_position_side
+                                        prev_size = self.trader.current_position_size
 
-                        # Time-based retraining instead of candle counting
-                        time_since_retrain = (datetime.now(timezone.utc) - self.last_retrain_time).total_seconds()
-                        if time_since_retrain >= RETRAIN_INTERVAL_SECONDS:
-                            logger.info(f"Retraining interval reached: {time_since_retrain/3600:.1f} hours (target: {RETRAIN_INTERVAL_SECONDS/3600:.1f} hours)")
-                            if len(features) >= self.model.sequence_length:
-                                logger.info("Retraining model with live data from correct timeframe...")
+                                        # Update current_positions list
+                                        side_int = 1 if pos_side == 'long' else -1 if pos_side == 'short' else 0
+                                        size_str = pos.get('pos', '0')
+                                        size_float = float(size_str) if size_str else 0.0
+                                        avg_px_str = pos.get('avgPx', '0') if 'avgPx' in pos else '0'
+                                        entry_price = float(avg_px_str) if avg_px_str else 0.0
+                                        level = next((i for i, p in enumerate(self.current_positions) if abs(p['entry_price'] - entry_price) < 1e-6 and p['side'] == side_int), len(self.current_positions))
+                                        if level == len(self.current_positions):
+                                            self.current_positions.append({
+                                                'side': side_int,
+                                                'size': size_float,
+                                                'entry_price': entry_price,
+                                                'level': level,
+                                                'entry_time': datetime.utcnow()  # Approximate
+                                            })
+                                        else:
+                                            self.current_positions[level]['size'] = size_float
 
-                                # Record retraining event
-                                retrain_number = len(retraining_history) + 1
-                                retraining_history.append({
-                                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                                    'retrain_number': retrain_number,
-                                    'equity_before': live_equity,
-                                    'timeframe': self.cfg["timeframe"],
-                                    'interval_hours': RETRAIN_INTERVAL_SECONDS / 3600
-                                })
+                                        # Update backward compatible fields
+                                        total_size = sum(p['size'] for p in self.current_positions)
+                                        if self.current_positions:
+                                            avg_side = max(set(p['side'] for p in self.current_positions), key=lambda s: sum(p['size'] for p in self.current_positions if p['side'] == s))
+                                        else:
+                                            avg_side = 0
+                                        self.trader.current_position_side = avg_side
+                                        self.trader.current_position_size = total_size
+                                        self.position_levels = len(self.current_positions)
 
-                                # Prepare features for training
-                                train_features = features.copy()
-                                if 'regime' in train_features.columns:
-                                    train_features = train_features.drop('regime', axis=1)
-                                if 'prediction' in train_features.columns:
-                                    train_features = train_features.drop('prediction', axis=1)
-                                train_features = train_features.apply(pd.to_numeric, errors='coerce').dropna()
-                                if len(train_features) >= self.model.sequence_length:
-                                    # Check if we have an existing model to fine-tune
-                                    model_exists = os.path.exists(self.cfg["paths"]["model_path"])
-                                    if model_exists:
-                                        try:
-                                            self.model.load(self.cfg["paths"]["model_path"])
-                                            logger.info("Loaded existing model for live retraining")
-                                            self.model.train(train_features, fine_tune=True)
-                                        except Exception as e:
-                                            logger.warning(f"Could not load existing model for live retraining: {e}")
-                                            self.model.train(train_features, fine_tune=False)
-                                    else:
-                                        logger.info("No existing model found for live retraining, training from scratch...")
-                                        self.model.train(train_features, fine_tune=False)
+                                        # Log significant changes
+                                        if prev_side != self.trader.current_position_side or abs(prev_size - self.trader.current_position_size) > 0.01 or prev_positions != self.trader.current_positions:
+                                            logger.info(f"Position updated from WS: side {prev_side}->{self.trader.current_position_side}, size {prev_size:.2f}->{self.trader.current_position_size:.2f}, positions count {len(self.trader.current_positions)}")
 
-                                    self.model.save(self.cfg["paths"]["model_path"])
-
-                                    # Save retraining history
-                                    pd.DataFrame(retraining_history).to_csv(retraining_history_path, index=False)
-
-                                    # Update plot with retraining data
-                                    try:
-                                        from scripts.plot_backtest import plot_equity_diagnostics
-                                        plot_path = Path(self.cfg["paths"]["state_dir"]) / "backtest_plot.png"
-                                        plot_equity_diagnostics(pd.Series([live_equity], index=[pd.Timestamp.now()]), plot_path, None)
-                                        logger.info(f"Updated live performance plot with retraining #{retrain_number}")
-                                    except Exception as e:
-                                        logger.warning(f"Could not update plot: {e}")
-
-                                    logger.info(f"Model retrained and saved (#{retrain_number}). Using {len(train_features)} bars from {self.cfg['timeframe']} timeframe.")
-                            self.last_retrain_time = datetime.now(timezone.utc)
-
-                        if len(features) >= self.model.sequence_length:
-                                # Manual signal check
-                                last_features = features.iloc[-1]
-                                prediction = self.model.predict(last_features.to_frame().T)
-                                composite = strategy._indicator_signals(last_features.to_frame().T).iloc[-1]
-                                adjusted_threshold = self.params.prediction_threshold + 2 * self.fees
-                                close_price = last_features['close']
-
-                                # Optional: Skip entry if volatility is too low (to reduce frequent trades)
-                                atr_vol = last_features['atr'] / close_price
-                                if atr_vol < 0.001:
-                                    logger.debug("Low volatility detected (ATR % < 0.1%). Skipping entry check.")
+                            elif channel == 'account':
+                                for acc in msg['data']:
+                                    if acc.get('ccy') == 'USDT':
+                                        avail_bal_str = acc.get('availBal', '0')
+                                        avail_bal = float(avail_bal_str) if avail_bal_str else 0.0
+                                        self.live_equity = avail_bal
+                                        logger.info(f"Updated USDT balance from WS: {avail_bal}")
+                            elif channel == tf_sub:
+                                candle_data = msg['data'][0]
+                                # Parse candle data (OKX sends as array: [ts, o, h, l, c, vol])
+                                if isinstance(candle_data, list) and len(candle_data) >= 6:
+                                    ts = int(candle_data[0])
+                                    o = float(candle_data[1])
+                                    h = float(candle_data[2])
+                                    l = float(candle_data[3])
+                                    c = float(candle_data[4])
+                                    vol = float(candle_data[5])
+                                else:
+                                    logger.warning(f"Unexpected candle data format: {candle_data}")
+                                    live.update(self.render_dashboard())
                                     continue
+                                # Create new row
+                                new_row = pd.DataFrame({
+                                    'timestamp': [pd.to_datetime(ts, unit='ms', utc=True)],
+                                    'open': [o],
+                                    'high': [h],
+                                    'low': [l],
+                                    'close': [c],
+                                    'volume': [vol]
+                                })
+                                # Append to historical data
+                                hist = pd.concat([hist, new_row], ignore_index=True)
+                                # Keep only recent bars
+                                hist = hist.tail(self.cfg["history_bars"])
+                                # Compute features
+                                features = compute_features(hist, {})
 
-                                if self.trader.current_position_side == 0:
-                                    # Check entry
-                                    if prediction > adjusted_threshold and composite > 0:
-                                        signal = 1
-                                    elif prediction < -adjusted_threshold and composite < 0:
-                                        signal = -1
-                                    else:
-                                        signal = 0
+                                # Time-based retraining instead of candle counting
+                                time_since_retrain = (datetime.now(timezone.utc) - self.last_retrain_time).total_seconds()
+                                if time_since_retrain >= RETRAIN_INTERVAL_SECONDS:
+                                    logger.info(f"Retraining interval reached: {time_since_retrain/3600:.1f} hours (target: {RETRAIN_INTERVAL_SECONDS/3600:.1f} hours)")
+                                    if len(features) >= self.model.sequence_length:
+                                        logger.info("Retraining model with live data from correct timeframe...")
 
-                                    if signal != 0:
-                                        size_base = risk.get_position_size(features, signal, close_price, position_level=0, current_positions=self.trader.current_positions)
+                                        # Record retraining event
+                                        retrain_number = len(retraining_history) + 1
+                                        retraining_history.append({
+                                            'timestamp': datetime.now(timezone.utc).isoformat(),
+                                            'retrain_number': retrain_number,
+                                            'equity_before': live_equity,
+                                            'timeframe': self.cfg["timeframe"],
+                                            'interval_hours': RETRAIN_INTERVAL_SECONDS / 3600
+                                        })
 
-                                        if size_base <= 0:
-                                            logger.warning("Calculated position size is zero or negative. Skipping order placement.")
-                                            continue
-
-                                        # Convert base currency to contracts/lots
-                                        if ct_val > 0:
-                                            sz_contracts = size_base / ct_val
-                                        else:
-                                            logger.error(f"Contract value (ctVal) is zero or invalid: {ct_val}. Cannot calculate order size.")
-                                            continue
-
-                                        # Round down to a valid multiple of the instrument's lot size
-                                        if lot_size > 0:
-                                            sz = math.floor(sz_contracts / lot_size) * lot_size
-                                            # Final rounding to handle potential float inaccuracies
-                                            sz = round(sz, 8)
-                                        else:
-                                            sz = sz_contracts
-
-                                        # Ensure we are ordering at least the minimum lot size
-                                        if sz < lot_size:
-                                            logger.warning(f"Calculated contract size {sz} is less than minimum lot size {lot_size}. Skipping order.")
-                                            # Instead of skipping, try to place minimum lot size order if allowed
-                                            if lot_size > 0:
-                                                sz = lot_size
+                                        # Prepare features for training
+                                        train_features = features.copy()
+                                        if 'regime' in train_features.columns:
+                                            train_features = train_features.drop('regime', axis=1)
+                                        if 'prediction' in train_features.columns:
+                                            train_features = train_features.drop('prediction', axis=1)
+                                        train_features = train_features.apply(pd.to_numeric, errors='coerce').dropna()
+                                        if len(train_features) >= self.model.sequence_length:
+                                            # Check if we have an existing model to fine-tune
+                                            model_exists = os.path.exists(self.cfg["paths"]["model_path"])
+                                            if model_exists:
+                                                try:
+                                                    self.model.load(self.cfg["paths"]["model_path"])
+                                                    logger.info("Loaded existing model for live retraining")
+                                                    self.model.train(train_features, fine_tune=True)
+                                                except Exception as e:
+                                                    logger.warning(f"Could not load existing model for live retraining: {e}")
+                                                    self.model.train(train_features, fine_tune=False)
                                             else:
+                                                logger.info("No existing model found for live retraining, training from scratch...")
+                                                self.model.train(train_features, fine_tune=False)
+
+                                            self.model.save(self.cfg["paths"]["model_path"])
+
+                                            # Save retraining history
+                                            pd.DataFrame(retraining_history).to_csv(retraining_history_path, index=False)
+
+                                            # Update plot with retraining data
+                                            try:
+                                                from scripts.plot_backtest import plot_equity_diagnostics
+                                                plot_path = Path(self.cfg["paths"]["state_dir"]) / "retrained_plot.png"
+                                                plot_equity_diagnostics(pd.Series([live_equity], index=[pd.Timestamp.now()]), plot_path, None)
+                                                logger.info(f"Updated live performance plot with retraining #{retrain_number}")
+                                            except Exception as e:
+                                                logger.warning(f"Could not update plot: {e}")
+
+                                            logger.info(f"Model retrained and saved (#{retrain_number}). Using {len(train_features)} bars from {self.cfg['timeframe']} timeframe.")
+                                    self.last_retrain_time = datetime.now(timezone.utc)
+
+                                if len(features) >= self.model.sequence_length:
+                                    # Manual signal check
+                                    last_features = features.iloc[-1]
+                                    prediction = self.model.predict(last_features.to_frame().T)
+                                    composite = strategy._indicator_signals(last_features.to_frame().T).iloc[-1]
+                                    adjusted_threshold = self.params.prediction_threshold + 2 * self.fees
+                                    close_price = last_features['close']
+
+                                    # Update dashboard variables
+                                    self.last_prediction = prediction
+                                    self.last_indicator_signal = composite
+                                    self.current_price = close_price
+                                    self.live_equity = live_equity
+
+                                    # Optional: Skip entry if volatility is too low (to reduce frequent trades)
+                                    atr_vol = last_features['atr'] / close_price
+                                    if atr_vol < 0.001:
+                                        logger.debug("Low volatility detected (ATR % < 0.1%). Skipping entry check.")
+                                        live.update(self.render_dashboard())
+                                        continue
+
+                                    if self.trader.current_position_side == 0:
+                                        # Check entry
+                                        if prediction > adjusted_threshold and composite > 0:
+                                            signal = 1
+                                        elif prediction < -adjusted_threshold and composite < 0:
+                                            signal = -1
+                                        else:
+                                            signal = 0
+
+                                        self.last_signal = signal
+
+                                        if signal != 0:
+                                            size_base = risk.get_position_size(features, signal, close_price, position_level=0, current_positions=self.trader.current_positions)
+
+                                            if size_base <= 0:
+                                                logger.warning("Calculated position size is zero or negative. Skipping order placement.")
+                                                live.update(self.render_dashboard())
                                                 continue
 
-                                        side = 'buy' if signal == 1 else 'sell'
-                                        response = self.trader.place_market(side, str(sz))
-                                        if response and response.get('code') == '0':
-                                            logger.info(f"Placed {side.upper()} market order for {sz} contracts successfully.")
-                                            # Optimistically update state to prevent re-entry before WS update
-                                            self.trader.current_position_side = signal
-                                            self.trader.current_position_size = size_base
-                                            self.trader.current_positions = [{'side': signal, 'size': size_base, 'entry_price': close_price, 'level': 0}]
-                                            self.entry_px = close_price
+                                            # Convert base currency to contracts/lots
+                                            if ct_val > 0:
+                                                sz_contracts = size_base / ct_val
+                                            else:
+                                                logger.error(f"Contract value (ctVal) is zero or invalid: {ct_val}. Cannot calculate order size.")
+                                                live.update(self.render_dashboard())
+                                                continue
+
+                                            # Round down to a valid multiple of the instrument's lot size
+                                            if lot_size > 0:
+                                                sz = math.floor(sz_contracts / lot_size) * lot_size
+                                                # Final rounding to handle potential float inaccuracies
+                                                sz = round(sz, 8)
+                                            else:
+                                                sz = sz_contracts
+
+                                            # Ensure we are ordering at least the minimum lot size
+                                            if sz < lot_size:
+                                                logger.warning(f"Calculated contract size {sz} is less than minimum lot size {lot_size}. Skipping order.")
+                                                # Instead of skipping, try to place minimum lot size order if allowed
+                                                if lot_size > 0:
+                                                    sz = lot_size
+                                                else:
+                                                    live.update(self.render_dashboard())
+                                                    continue
+
+                                            side = 'buy' if signal == 1 else 'sell'
+                                            response = self.trader.place_market(side, str(sz))
+                                            if response and response.get('code') == '0':
+                                                logger.info(f"Placed {side.upper()} market order for {sz} contracts successfully.")
+                                                # Optimistically update state to prevent re-entry before WS update
+                                                self.trader.current_position_side = signal
+                                                self.trader.current_position_size = size_base
+                                                self.trader.current_positions = [{'side': signal, 'size': size_base, 'entry_price': close_price, 'level': 0}]
+                                                self.entry_px = close_price
+                                                self.highest_profit = 0.0
+                                                self.last_order = {'side': side, 'size': sz, 'price': close_price, 'time': datetime.now(timezone.utc)}
+                                            else:
+                                                logger.error(f"{side.upper()} entry failed: {response.get('msg') if response else 'No response'}. Skipping.")
+
+                                    else:
+                                        # Check exit
+                                        logger.debug("Entering exit check branch.")
+                                        entry_px = self.trader.current_positions[0]['entry_price'] if self.trader.current_positions else self.entry_px
+                                        pnl = (close_price - entry_px) / entry_px if self.trader.current_position_side == 1 else (entry_px - close_price) / entry_px
+                                        self.highest_profit = max(self.highest_profit, pnl)
+
+                                        prediction_val = self.model.predict(last_features.to_frame().T)
+
+                                        logger.debug(f"Exit check: pos={self.trader.current_position_side}, entry_px={entry_px:.4f}, close_price={close_price:.4f}, pnl={pnl:.4f}, highest_profit={self.highest_profit:.4f}, prediction={prediction_val:.4f}")
+
+                                        exit_now = strategy._handle_exit_signals(
+                                            last_features,
+                                            prediction_val,
+                                            close_price,
+                                            self.trader.current_position_side,
+                                            entry_px,
+                                            self.highest_profit,
+                                            live_equity
+                                        )
+
+                                        if exit_now:
+                                            logger.info("Exit signal triggered, closing position")
+                                            pos_side = 'long' if self.trader.current_position_side == 1 else 'short'
+                                            response = self.trader.force_close_position(pos_side)
+                                            logger.info(f"Force close response for {pos_side}: {response}")
+                                            
+                                            # Sync local state with API to confirm close
+                                            sync_success = self.trader.sync_position_with_api()
+                                            logger.info(f"Position sync after close: success={sync_success}, side={self.trader.current_position_side}, size={self.trader.current_position_size}")
+                                            
+                                            self.entry_px = np.nan
                                             self.highest_profit = 0.0
+                                            logger.info("Local position reset to flat")
                                         else:
-                                            logger.error(f"{side.upper()} entry failed: {response.get('msg') if response else 'No response'}. Skipping.")
+                                            logger.debug("No exit signal")
 
+                            # Update dashboard after processing message
+                            live.update(self.render_dashboard())
+
+                    except queue.Empty:
+                        # Update balance periodically
+                        balance_update_counter += 1
+                        if balance_update_counter >= BALANCE_UPDATE_INTERVAL:
+                            logger.info("Re-fetching USDT balance...")
+                            balance_response = self.trader.get_balance(ccy='USDT')
+                            if balance_response and balance_response.get("code") in ("0", 0) and balance_response.get('data'):
+                                new_equity = float(balance_response['data'][0]['details'][0]['availBal'])
+                                if abs(new_equity - live_equity) > 0.01:
+                                    logger.info(f"Balance updated: {live_equity:.2f} -> {new_equity:.2f}")
+                                    live_equity = new_equity
+                                    risk = RiskManager(RiskConfig.from_cfg(self.cfg["risk"]),
+                                                       lot_size=lot_size,
+                                                       fees=self.cfg["fees"],
+                                                       live_equity=live_equity)
+                                    strategy = LSTMStrategy(self.params, risk, self.model, fees=self.cfg["fees"])
                                 else:
-                                    # Check exit
-                                    logger.debug("Entering exit check branch.")
-                                    entry_px = self.trader.current_positions[0]['entry_price'] if self.trader.current_positions else self.entry_px
-                                    pnl = (close_price - entry_px) / entry_px if self.trader.current_position_side == 1 else (entry_px - close_price) / entry_px
-                                    self.highest_profit = max(self.highest_profit, pnl)
+                                    logger.debug("Balance unchanged.")
+                            balance_update_counter = 0
 
-                                    prediction_val = self.model.predict(last_features.to_frame().T)
-
-                                    exit_now = strategy._handle_exit_signals(
-                                        last_features,
-                                        prediction_val,
-                                        close_price,
-                                        self.trader.current_position_side,
-                                        entry_px,
-                                        self.highest_profit,
-                                        live_equity
-                                    )
-
-                                    if exit_now:
-                                        if self.trader.current_position_side == 1:
-                                            self.trader.force_close_position('long')
-                                        elif self.trader.current_position_side == -1:
-                                            self.trader.force_close_position('short')
-                                        self.trader.current_position_side = 0
-                                        self.trader.current_position_size = 0.0
-                                        self.trader.current_positions = []
-                                        self.entry_px = np.nan
-                                        self.highest_profit = 0.0
-
-            except queue.Empty:
-                # Update balance periodically
-                balance_update_counter += 1
-                if balance_update_counter >= BALANCE_UPDATE_INTERVAL:
-                    logger.info("Re-fetching USDT balance...")
-                    balance_response = self.trader.get_balance(ccy='USDT')
-                    if balance_response and balance_response.get("code") in ("0", 0) and balance_response.get('data'):
-                        new_equity = float(balance_response['data'][0]['details'][0]['availBal'])
-                        if abs(new_equity - live_equity) > 0.01:
-                            logger.info(f"Balance updated: {live_equity:.2f} -> {new_equity:.2f}")
-                            live_equity = new_equity
-                            risk = RiskManager(RiskConfig.from_cfg(self.cfg["risk"]),
-                                               lot_size=lot_size,
-                                               fees=self.cfg["fees"],
-                                               live_equity=live_equity)
-                            strategy = LSTMStrategy(self.params, risk, self.model, fees=self.cfg["fees"])
-                        else:
-                            logger.debug("Balance unchanged.")
-                    balance_update_counter = 0
-
-                # Check for re-optimization
-                if (datetime.now(timezone.utc) - (self._last_reopt or datetime.min.replace(tzinfo=timezone.utc))).total_seconds() >= self.cfg["runtime"]["reoptimize_hours"] * 3600:
-                    logger.info("Live re-optimization triggered.")
-                    try:
-                        self.params = self.walk_forward_optimize(hist)
-                        self._last_reopt = datetime.now(timezone.utc)
-                        self.trader.params = self.params
-                        # Update strategy with new params
-                        strategy = LSTMStrategy(self.params, risk, self.model, fees=self.cfg["fees"])
-                        logger.info("Re-optimization complete.")
-                    except Exception as e:
-                        logger.error(f"Re-optimization failed: {e}")
-                time.sleep(1)
+                        # Check for re-optimization
+                        if (datetime.now(timezone.utc) - (self._last_reopt or datetime.min.replace(tzinfo=timezone.utc))).total_seconds() >= self.cfg["runtime"]["reoptimize_hours"] * 3600:
+                            logger.info("Live re-optimization triggered.")
+                            try:
+                                self.params = self.walk_forward_optimize(hist)
+                                self._last_reopt = datetime.now(timezone.utc)
+                                self.trader.params = self.params
+                                # Update strategy with new params
+                                strategy = LSTMStrategy(self.params, risk, self.model, fees=self.cfg["fees"])
+                                logger.info("Re-optimization complete.")
+                            except Exception as e:
+                                logger.error(f"Re-optimization failed: {e}")
+                        time.sleep(1)
+                        live.update(self.render_dashboard())
             except KeyboardInterrupt:
                 logger.info("Keyboard interrupt received. Shutting down live loop.")
-                break
+                running = False
             except Exception as e:
                 logger.error(f"Error in live loop: {e}")
                 time.sleep(5)
