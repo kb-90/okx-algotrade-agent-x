@@ -1,8 +1,0 @@
-# the active config parameters will be automatically generated and saved here over the current file contents once the strategy has successfully completed a full training run.
-# you can find all this info in the README.md file, so don't stress!
-# python -m agent_x train
-# OR
-# python -m agent_x.cli train
-# after training, I recommend letting the strategy run in demo mode before trading with real currency
-# begin demo trading with:
-# python -m agent_x live (BUT MAKE SURE THAT DEMO MODE IS SET TO TRUE! Set in config.py)
