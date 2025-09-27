@@ -13,3 +13,4 @@ matplotlib
 websocket-client
 python-okx
 playsound
+rich>=13.0.0
