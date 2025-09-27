@@ -12,17 +12,17 @@ def load_config():
         "api_secret": os.getenv("OKX_API_SECRET", ""),
         "passphrase": os.getenv("OKX_PASSPHRASE", ""),
         "symbol": "XRP-USDT-SWAP",
-        "timeframe": "5m",
+        "timeframe": "15m",
         "tdMode": "isolated",
         "posMode": "long_short_mode",
         "data_source": "okx",
         "fees": 0.0005,
-        "slippage": 0.0001,
-        "history_bars": 11000,
+        "slippage": 0.00015,
+        "history_bars": 4000,
         
         "walk_forward": {
-            "train_bars": 10000,
-            "test_bars": 1000,
+            "train_bars": 2750,
+            "test_bars": 1250,
             "pop": 30,
             "gens": 12,
             "topk": 6
@@ -47,43 +47,42 @@ def load_config():
             "demo": True
         },
         
-        "scaling": {
-            "enabled": True,
-            "thresholds": [0.01, 0.02],  # Increased thresholds for less frequent scaling to improve profitability
-            "position_ratios": [1.0, 0.5],  # Adjusted ratios for better scaling
-            "exit_strategy": "full"  # "partial" or "full" - partial closes positions in reverse order
-        },
-        
         "risk": {
-            "max_open_orders": 2, # Maximum number of open orders allowed - Should this be 3 or 3.0?
-            "leverage": 4, # Increased leverage for higher returns
+            "max_open_orders": 2, # Maximum number of open orders allowed
+            "leverage": 5, # Increased leverage for higher returns
             "backtest_equity": 30.0, # Used for backtesting and walk-forward analysis
             "max_daily_loss": 0.15, # Tighter daily loss limit
-            "max_exposure": 0.9, # Lower exposure to control risk
-            "risk_per_trade": 0.4 # Increased risk per trade for more position size
+            "max_exposure": 0.8, # Lower exposure to control risk
+            "risk_per_trade": 0.4, # Before leverage, portion of equity risked per trade
+            "position_ratios": [1.0, 0.5]  # Configurable position size ratios for scaling (initial, second position)
         },
         
         "lstm_params": {
             "sequence_length": 100,
-            "epochs": 66,
-            "batch_size": 66,
-            "future_bars": 21
+            "epochs": 50,
+            "batch_size": 50,
+            "future_bars": 16
         },
         
         "lstm_strategy_params": {
+            "exit_mode": "intelligent",
+            "atr_mult_sl": 2.3,
+            "initial_trail_pct": 0.06,
+            "profit_trigger_pct": 0.06,
+            "tighter_trail_pct": 0.01,
+            "lstm_disagreement_pct": 0.005,
+            "prediction_threshold": 0.0015,
             "indicator_weights": {
                 "rsi": 0.3,
                 "macd": 0.4,
                 "bb": 0.3
-            },
-            "exit_mode": "intelligent",
-            "atr_mult_sl": 2.75,
-            "initial_trail_pct": 0.06,
-            "profit_trigger_pct": 0.04,
-            "tighter_trail_pct": 0.02,
-            "lstm_disagreement_pct": 0.007,
-            "prediction_threshold": 0.00175
+            }  
         }
+        # possible additions to consider (contemplating improvements to strategy):
+            # "min_trade_duration": 1,
+            # "min_confidence": 0.5
+            # "max_holding_period": 24,
+            # "take_profit_multiplier": 2.0,
     }
 
     cfg = deepcopy(DEFAULT_CFG)
@@ -95,8 +94,6 @@ def load_config():
         cfg["timeframe"] = os.getenv("OKX_TIMEFRAME")
     if os.getenv("DATA_SOURCE"):
         cfg["data_source"] = os.getenv("DATA_SOURCE")
-    if os.getenv("HISTORY_BARS"):
-        cfg["history_bars"] = int(os.getenv("HISTORY_BARS"))
     if os.getenv("OKX_WS_PUBLIC_URL"):
         cfg["runtime"]["ws_public"] = os.getenv("OKX_WS_PUBLIC_URL")
     if os.getenv("OKX_WS_PRIVATE_URL"):
@@ -121,48 +118,6 @@ def load_config():
     snapshot_path = Path(cfg["paths"]["state_dir"]) / "active_config.json"
     with snapshot_path.open("w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
-
-    return cfg
-
-def get_ultra_aggressive_params():
-    """Ultra-aggressive parameters optimized for $25 starting capital"""
-    from .strategy import LSTMStratParams
-
-    return LSTMStratParams(
-        prediction_threshold=0.0008,  # More aggressive threshold
-        indicator_weights={'rsi': 0.3, 'macd': 0.4, 'bb': 0.3},  # Favor momentum more
-        exit_mode='mechanical',
-        atr_mult_sl=1.8,  # Even tighter stops
-        initial_trail_pct=0.04,  # 4% trailing
-        profit_trigger_pct=0.03,  # 2.5% profit target
-        lstm_disagreement_pct=0.008  # Slightly less strict disagreement
-    )
-
-def load_config_for_small_cap(starting_capital: float = 25.0):
-    """Load configuration optimized for small capital trading"""
-    cfg = load_config()
-
-    # Adjust risk parameters for small capital
-    cfg["risk"]["backtest_equity"] = starting_capital
-    cfg["risk"]["account_equity"] = starting_capital
-    cfg["risk"]["risk_per_trade"] = 0.45  # Slightly higher risk per trade for small capital
-    cfg["risk"]["max_daily_loss"] = 0.125  # Slightly looser daily loss limit
-
-    # Adjust scaling thresholds for small capital
-    cfg["scaling"]["thresholds"] = [0.008, 0.018]  # Lower thresholds for more frequent scaling
-    cfg["scaling"]["position_ratios"] = [1.0, 0.6, 0.3]  # Adjusted position ratios for better scaling
-
-    # Adjust LSTM strategy parameters for small capital
-    # Keep as dictionary to match config structure
-    cfg["lstm_strategy_params"] = {
-        "prediction_threshold": 0.0015,  # More aggressive threshold
-        "indicator_weights": {'rsi': 0.4, 'macd': 0.3, 'bb': 0.3},
-        "exit_mode": 'mechanical',
-        "atr_mult_sl": 2.75,
-        "initial_trail_pct": 0.045,
-        "profit_trigger_pct": 0.05,
-        "lstm_disagreement_pct": 0.008
-    }
 
     return cfg
 
