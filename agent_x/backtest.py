@@ -28,21 +28,12 @@ def compute_metrics(equity: pd.Series) -> dict:
     drawdown = (equity - roll_max) / roll_max
     max_dd = drawdown.min()
 
-    # Underwater metrics don't make sense! At the end of the training we see "UnderwaterBars": 9414, with  "TotalBars": 10000 and "TotalUnderwaterLoss": 10201.564961588712,
-    # yet somehow we see this as well which is contradicory: "Start": 30.0,  "Final": 64.90551200911226, "MaxDD": 0.18754086372580864, "Sharpe": 0.4958241120556928, "CAGR": 14.006652800791437,
-    underwater_mask = equity < roll_max
-    total_underwater_loss = ((roll_max - equity) * underwater_mask).sum()
-    underwater_bars = underwater_mask.sum()
-
     metrics.update({
         "CAGR": float(cagr),
         "Sharpe": float(sharpe),
         "MaxDD": float(abs(max_dd)),
         "Final": float(equity.iloc[-1]),
-        "Start": float(equity.iloc[0]),
-        "TotalUnderwaterLoss": float(total_underwater_loss),
-        "UnderwaterBars": int(underwater_bars),
-        "TotalBars": len(equity)
+        "Start": float(equity.iloc[0])
     })
     return metrics
 
@@ -261,6 +252,7 @@ class Backtester:
             equity_df.to_csv(equity_path, index=False)
             logger.info(f"Saved equity curve to {equity_path}")
 
+            trade_path = None
             if trade_history:
                 trade_path = Path(self.cfg["paths"].get("trade_history", "state/trade_history.csv"))
                 pd.DataFrame(trade_history).to_csv(trade_path, index=False)
@@ -270,7 +262,7 @@ class Backtester:
                 from scripts.plot_backtest import plot_equity_diagnostics
                 plot_path = equity_path.with_name("backtest_plot.png")
                 plot_equity_diagnostics(equity_series, plot_path, trade_path)
-            except ImportError:
-                logger.warning("Could not import plot_equity_diagnostics")
+            except Exception as e:
+                logger.warning(f"Could not generate backtest plot: {e}")
 
         return metrics
