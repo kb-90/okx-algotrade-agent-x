@@ -9,14 +9,14 @@ from agent_x.risk import RiskManager, RiskConfig
 
 class TestLiveLoop(unittest.TestCase):
     def setUp(self):
-        # Setup a minimal config dict
+        # Setup a minimal config dict (fix fees to float)
         self.cfg = {
             "symbol": "ADA-USDT-SWAP",
             "timeframe": "3m",
             "history_bars": 100,
             "data_source": "okx",
             "runtime": {
-                "reoptimize_hours": 1,
+                "reoptimize_hours": 24,
                 "base_url": "https://www.okx.com",
                 "base_url_demo": "https://www.okx.com",
                 "ws_private": "wss://ws.okx.com:8443/ws/v5/private",
@@ -33,21 +33,17 @@ class TestLiveLoop(unittest.TestCase):
             },
             "risk": {
                 "risk_per_trade": 0.1,
-                "vol_target": 0.1,
                 "leverage": 3,
                 "max_daily_loss": 0.2,
                 "max_exposure": 0.9,
                 "backtest_equity": 50
             },
             "lstm_params": {},
-            "fees": {
-                "maker": 0.0002,
-                "taker": 0.0005
-            },
+            "fees": 0.0005,  # Fixed: Use float instead of dict
             "api_key_demo": "test_key",
             "api_secret_demo": "test_secret",
-                "passphrase_demo": "test_passphrase"
-            }
+            "passphrase_demo": "test_passphrase"
+        }
 
         # Mock the entire Agent to avoid initialization issues
         self.agent = MagicMock()
@@ -60,11 +56,11 @@ class TestLiveLoop(unittest.TestCase):
         self.agent.trader.current_position_side = 0
         self.agent.trader.current_position_size = 0.0
         self.agent.trader.place_market = MagicMock(return_value={"data": [{"fillPx": "0.873"}]})
-        self.agent.trader.account.get_account_balance = MagicMock(return_value={"code": "0", "data": [{"details": [{"availBal": "1000"}]}]})
+        self.agent.trader.get_balance = MagicMock(return_value={"code": "0", "data": [{"details": [{"availBal": "1000"}]}]})
 
         # Mock risk manager
         self.agent.risk = MagicMock()
-        self.agent.risk.get_position_size = MagicMock(return_value=0.01)
+        self.agent.risk.get_position_size = MagicMock(return_value=10.0)  # Float
 
         # Mock data
         self.agent.data = MagicMock()
@@ -80,7 +76,7 @@ class TestLiveLoop(unittest.TestCase):
         self.agent._last_reopt = datetime.now(timezone.utc) - timedelta(hours=2)
         self.agent.walk_forward_optimize = MagicMock(return_value=self.agent.params)
         self.agent.api_client = MagicMock()
-        self.agent.api_client.market.get_instrument_details = MagicMock(return_value={"data": [{"lotSz": "0.1"}]})
+        self.agent.api_client.market.get_instrument_details = MagicMock(return_value={"code": "0", "data": [{"lotSz": "0.1", "ctVal": "10"}]})
         # Mock the strategy
         self.agent.strategy = MagicMock()
         # Mock generate_signals to return tuple for scaling support
@@ -101,7 +97,7 @@ class TestLiveLoop(unittest.TestCase):
 
         # Mock risk manager
         mock_risk = MockRiskManager.return_value
-        mock_risk.get_position_size.return_value = 10.0  # Increased for realistic sizing to trigger placement without min lot override
+        mock_risk.get_position_size.return_value = 10.0  # Increased for realistic sizing
 
         # Mock strategy
         mock_strategy = MockLSTMStrategy.return_value
@@ -137,15 +133,15 @@ class TestLiveLoop(unittest.TestCase):
         real_agent = Agent(self.cfg)
         real_agent.model = MagicMock()
         real_agent.model.sequence_length = 10
-        real_agent.model.predict = MagicMock(return_value=0.05)
-        real_agent.model.predict_sequence = MagicMock(return_value=[0.05]*self.cfg["history_bars"])
+        real_agent.model.predict = MagicMock(return_value=0.88)  # Fixed: Absolute > close * (1 + threshold) for positive relative
+        real_agent.model.predict_sequence = MagicMock(return_value=[0.88]*self.cfg["history_bars"])
         real_agent.params = LSTMStratParams()
         real_agent.strategy = MagicMock()
         real_agent.strategy._indicator_signals.return_value = pd.Series([0.5])
         real_agent.trader = MagicMock()
         real_agent.trader.current_position_side = 0
         real_agent.trader.current_position_size = 0.0
-        real_agent.trader.place_market = MagicMock(return_value={"data": [{"fillPx": "0.873"}]})
+        real_agent.trader.place_market = MagicMock(return_value={"code": "0", "data": [{"fillPx": "0.873"}]})
         real_agent.trader.get_balance = MagicMock(return_value={"code": "0", "data": [{"details": [{"availBal": "1000"}]}]})
         real_agent.trader.get_position = MagicMock(return_value={"code": "0", "data": []})
         real_agent.trader.cancel_all_orders = MagicMock(return_value={"cancelled": 0})
@@ -153,7 +149,7 @@ class TestLiveLoop(unittest.TestCase):
         real_agent._last_reopt = datetime.now(timezone.utc) - timedelta(hours=2)
         real_agent.walk_forward_optimize = MagicMock(return_value=real_agent.params)
         real_agent.api_client = MagicMock()
-        real_agent.api_client.market.get_instrument_details = MagicMock(return_value={"code": "0", "data": [{"lotSz": "0.1", "ctVal": "10"}]})  # Added "code": "0" for instrument fetch success
+        real_agent.api_client.market.get_instrument_details = MagicMock(return_value={"code": "0", "data": [{"lotSz": "0.1", "ctVal": "10"}]})
         # Mock the data fetch_history method
         real_agent.data.fetch_history = MagicMock(return_value=pd.DataFrame({
             "timestamp": pd.date_range(end=datetime.now(timezone.utc), periods=self.cfg["history_bars"], freq="min"),
@@ -185,4 +181,3 @@ class TestLiveLoop(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-    
