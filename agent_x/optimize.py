@@ -31,20 +31,21 @@ class EvoSearch:
         normalized_weights = self._normalize_weights(raw_weights)
 
         return LSTMStratParams(
-            prediction_threshold=round(self.rng.uniform(0.0005, 0.003), 6),  # EXTREMELY aggressive
+            prediction_threshold=round(self.rng.uniform(0.0005, 0.005), 6),  # Range from 0.05% to 5% for more comprehensive testing
             indicator_weights={k: round(v, 6) for k, v in normalized_weights.items()},
             exit_mode=self.rng.choice(['mechanical', 'intelligent']),
-            atr_mult_sl=round(self.rng.uniform(1.5, 4.0), 6),
-            initial_trail_pct=round(self.rng.uniform(0.01, 0.08), 6),
-            profit_trigger_pct=round(self.rng.uniform(0.02, 0.12), 6),
-            tighter_trail_pct=round(self.rng.uniform(0.005, 0.04), 6),
-            lstm_disagreement_pct=round(self.rng.uniform(0.005, 0.03), 6),
+            atr_mult_sl=round(self.rng.uniform(1.0, 5.0), 6),  # Wider stop loss multiplier range
+            initial_trail_pct=round(self.rng.uniform(0.005, 0.15), 6),  # Wider trailing stop range
+            profit_trigger_pct=round(self.rng.uniform(0.01, 0.20), 6),  # Wider profit taking range
+            tighter_trail_pct=round(self.rng.uniform(0.002, 0.08), 6),  # Wider tighter trail range
+            lstm_disagreement_pct=round(self.rng.uniform(0.001, 0.05), 6),  # Wider disagreement threshold
             future_bars=self.rng.randint(3, 15),  # Sample future_bars
 
-            vol_target=round(self.rng.uniform(0.5, 1.0), 6),
             max_daily_loss=round(self.rng.uniform(0.05, 0.25), 6),
             max_exposure=round(self.rng.uniform(0.5, 1.0), 6),
             risk_per_trade=round(self.rng.uniform(0.1, 0.5), 6),
+            scaling_thresholds=[round(self.rng.uniform(0.005, 0.03), 6), round(self.rng.uniform(0.01, 0.05), 6)],  # Scaling thresholds for position scaling
+            partial_exit_thresholds=[round(self.rng.uniform(0.002, 0.01), 6), round(self.rng.uniform(0.005, 0.02), 6), round(self.rng.uniform(0.01, 0.03), 6)],  # Partial exit thresholds
         )
 
     def mutate(self, p: LSTMStratParams) -> LSTMStratParams:
@@ -68,43 +69,40 @@ class EvoSearch:
             scale = 0.2
             new_val = int(q.future_bars * (1 + self.rng.uniform(-scale, scale)))
             q.future_bars = max(3, min(new_val, 15))
-
         
-
         elif isinstance(getattr(q, attr_to_mutate), float):
             current_val = getattr(q, attr_to_mutate)
 
             # Group attributes by scale for cleaner code
             scale_0025_attrs = {'prediction_threshold', 'initial_trail_pct', 'tighter_trail_pct', 'lstm_disagreement_pct'}
             scale_005_attrs = {'profit_trigger_pct', 'max_daily_loss'}
-            scale_05_attrs = {'vol_target', 'max_exposure', 'risk_per_trade'}
+            scale_05_attrs = {'max_exposure', 'risk_per_trade'}
             scale_1_attrs = set()
             scale_01_attrs = {'atr_mult_sl'}
+            list_attrs = {'scaling_thresholds', 'partial_exit_thresholds'}
 
             if attr_to_mutate in scale_0025_attrs:
                 scale = 0.0025
                 new_val = current_val * (1 + self.rng.uniform(-scale, scale))
                 if attr_to_mutate == 'prediction_threshold':
-                    new_val = max(0.0025, min(new_val, 0.03))
+                    new_val = max(0.0005, min(new_val, 0.005))
                 elif attr_to_mutate == 'initial_trail_pct':
-                    new_val = max(0.005, min(new_val, 0.1))
+                    new_val = max(0.005, min(new_val, 0.15))
                 elif attr_to_mutate == 'tighter_trail_pct':
-                    new_val = max(0.0025, min(new_val, 0.09))
+                    new_val = max(0.002, min(new_val, 0.08))
                 elif attr_to_mutate == 'lstm_disagreement_pct':
-                    new_val = max(0.005, min(new_val, 0.1))
+                    new_val = max(0.001, min(new_val, 0.05))
             elif attr_to_mutate in scale_005_attrs:
                 scale = 0.005
                 new_val = current_val * (1 + self.rng.uniform(-scale, scale))
                 if attr_to_mutate == 'profit_trigger_pct':
-                    new_val = max(0.02, min(new_val, 0.1))
+                    new_val = max(0.01, min(new_val, 0.20))
                 elif attr_to_mutate == 'max_daily_loss':
                     new_val = max(0.05, min(new_val, 0.25))
             elif attr_to_mutate in scale_05_attrs:
                 scale = 0.05
                 new_val = current_val * (1 + self.rng.uniform(-scale, scale))
-                if attr_to_mutate == 'vol_target':
-                    new_val = max(0.5, min(new_val, 1.0))
-                elif attr_to_mutate == 'max_exposure':
+                if attr_to_mutate == 'max_exposure':
                     new_val = max(0.5, min(new_val, 0.95))
                 elif attr_to_mutate == 'risk_per_trade':
                     new_val = max(0.1, min(new_val, 0.5))
@@ -116,11 +114,40 @@ class EvoSearch:
                 scale = 0.1
                 new_val = current_val * (1 + self.rng.uniform(-scale, scale))
                 new_val = max(1.0, min(new_val, 5.0))
+            elif attr_to_mutate in list_attrs:
+                # Mutate list attributes
+                if attr_to_mutate == 'scaling_thresholds':
+                    # Mutate scaling thresholds (should be in ascending order)
+                    new_thresholds = []
+                    for i, threshold in enumerate(current_val):
+                        mutated = threshold * (1 + self.rng.uniform(-0.1, 0.1))
+                        mutated = max(0.001, min(mutated, 0.1))  # Keep within reasonable bounds
+                        new_thresholds.append(round(mutated, 6))
+                    # Ensure ascending order
+                    new_thresholds.sort()
+                    # Ensure minimum separation between thresholds
+                    for i in range(1, len(new_thresholds)):
+                        if new_thresholds[i] - new_thresholds[i-1] < 0.001:
+                            new_thresholds[i] = new_thresholds[i-1] + 0.001
+                    q.scaling_thresholds = new_thresholds
+                elif attr_to_mutate == 'partial_exit_thresholds':
+                    # Mutate partial exit thresholds (should be in ascending order)
+                    new_thresholds = []
+                    for i, threshold in enumerate(current_val):
+                        mutated = threshold * (1 + self.rng.uniform(-0.1, 0.1))
+                        mutated = max(0.001, min(mutated, 0.05))  # Keep within reasonable bounds
+                        new_thresholds.append(round(mutated, 6))
+                    # Ensure ascending order
+                    new_thresholds.sort()
+                    # Ensure minimum separation between thresholds
+                    for i in range(1, len(new_thresholds)):
+                        if new_thresholds[i] - new_thresholds[i-1] < 0.001:
+                            new_thresholds[i] = new_thresholds[i-1] + 0.001
+                    q.partial_exit_thresholds = new_thresholds
             else:
-                # Fallback for any ungrouped float attributes
                 scale = 0.1
                 new_val = current_val * (1 + self.rng.uniform(-scale, scale))
-
+                
             q.__dict__[attr_to_mutate] = round(new_val, 6) if isinstance(new_val, float) else new_val
         
         return q
@@ -136,13 +163,8 @@ class EvoSearch:
         if abs(final_equity - start_equity) < 0.001:
             return -1e6
 
-        total_underwater_loss = metrics.get("TotalUnderwaterLoss", 0.0)
-        underwater_bars = metrics.get("UnderwaterBars", 0)
-        total_bars = metrics.get("TotalBars", 1000)  # fallback
-        normalized_underwater = (total_underwater_loss / start_equity) + 0.1 * (underwater_bars / total_bars)
-
-        # 75% profit, 25% underwater penalty
-        score = 0.75 * final_equity - 0.25 * normalized_underwater * start_equity
+        max_dd = metrics.get("MaxDD", 0.0)
+        score = 0.75 * final_equity - 0.25 * max_dd * start_equity  # 75% profit, 25% max drawdown penalty
 
         return score
 
@@ -164,75 +186,19 @@ class EvoSearch:
 
     def search(self, search_features: pd.DataFrame, cfg, model) -> LSTMStratParams:
         logger.info("Starting EXTREMELY aggressive evolutionary search...")
-
-        lot_size = 0.1
-        # Note: risk_manager will be created per params in the loop
-
-        # NEW: compute cached predictions once
-        search_df = self._attach_cached_predictions(search_features, model)
-        
+        lot_size = 0.01
+        search_df = self._attach_cached_predictions(search_features, model) # NEW: compute cached predictions once
         population = []
         best_overall_score = -float('inf')
         best_overall_params = None
 
-        # Test a few manual ultra-aggressive parameters first
-        manual_test_params = [
-            LSTMStratParams(
-                prediction_threshold=0.0001,  # 0.01%
-                indicator_weights={'rsi': 0.33, 'macd': 0.33, 'bb': 0.34},
-                exit_mode='mechanical'
-            ),
-            LSTMStratParams(
-                prediction_threshold=0.0005,  # 0.05%
-                indicator_weights={'rsi': 0.33, 'macd': 0.33, 'bb': 0.34},
-                exit_mode='mechanical'
-            ),
-            LSTMStratParams(
-                prediction_threshold=0.001,   # 0.1%
-                indicator_weights={'rsi': 0.33, 'macd': 0.33, 'bb': 0.34},
-                exit_mode='mechanical'
-            )
-        ]
-
-        logger.info("Testing manual ultra-aggressive parameters...")
-        for i, p in enumerate(manual_test_params):
-            try:
-                risk_cfg = {
-                    "backtest_equity": cfg["risk"]["backtest_equity"],
-                    "vol_target": p.vol_target,
-                    "leverage": cfg["risk"]["leverage"],
-                    "max_daily_loss": p.max_daily_loss,
-                    "max_exposure": p.max_exposure,
-                    "risk_per_trade": p.risk_per_trade,
-                    "max_open_orders": cfg["risk"]["max_open_orders"],
-                }
-                risk_manager = RiskManager(RiskConfig.from_cfg(risk_cfg), lot_size=lot_size, fees=cfg["fees"])
-                strategy = LSTMStrategy(p, risk_manager, model, fees=cfg["fees"])
-                bt = Backtester(cfg, strategy)
-                # CHANGED: use cached predictions
-                metrics = bt.run(search_df)
-                score = self.score(metrics)
-                population.append((p, score))
-
-                logger.info(f"Manual test {i}: pred_th={p.prediction_threshold:.6f}, "
-                            f"score={score:.2f}, trades_occurred={abs(metrics.get('Final', 0) - cfg['risk']['backtest_equity']) > 0.001}")
-
-                if score > best_overall_score:
-                    best_overall_score = score
-                    best_overall_params = copy.deepcopy(p)
-
-            except Exception as e:
-                logger.warning(f"Manual test {i} failed: {e}")
-                population.append((p, -1e9))
-
         # Add random population
-        initial_params = [self.sample_params() for _ in range(self.pop - len(manual_test_params))]
+        initial_params = [self.sample_params() for _ in range(self.pop)]
         
         for i, p in enumerate(initial_params):
             try:
                 risk_cfg = {
                     "backtest_equity": cfg["risk"]["backtest_equity"],
-                    "vol_target": p.vol_target,
                     "leverage": cfg["risk"]["leverage"],
                     "max_daily_loss": p.max_daily_loss,
                     "max_exposure": p.max_exposure,
@@ -270,14 +236,16 @@ class EvoSearch:
                     f"trading_strategies={trading_strategies}/{len(population)}")
             
             if trading_strategies == 0:
-                logger.warning("NO STRATEGIES ARE TRADING! Creating ultra-aggressive population...")
-                # Create extremely aggressive new population
+                logger.warning("NO STRATEGIES ARE TRADING! Creating aggressive population...")
+                # Create aggressive new population
                 new_pop = []
                 for _ in range(self.pop):
                     p = LSTMStratParams(
-                        prediction_threshold=self.rng.uniform(0.00001, 0.002),  # 0.001% to 0.2%
+                        prediction_threshold=self.rng.uniform(0.0005, 0.005),
                         indicator_weights={'rsi': 0.33, 'macd': 0.33, 'bb': 0.34},
-                        exit_mode='mechanical'
+                        exit_mode='intelligent',
+                        scaling_thresholds=[0.01, 0.02],
+                        partial_exit_thresholds=[0.005, 0.01, 0.015]
                     )
                     new_pop.append((p, -1e9))
                 population = new_pop
@@ -299,7 +267,6 @@ class EvoSearch:
                 try:
                     risk_cfg = {
                         "backtest_equity": cfg["risk"]["backtest_equity"],
-                        "vol_target": mutated_p.vol_target,
                         "leverage": cfg["risk"]["leverage"],
                         "max_daily_loss": mutated_p.max_daily_loss,
                         "max_exposure": mutated_p.max_exposure,
@@ -326,14 +293,6 @@ class EvoSearch:
 
         # Return best parameters
         final_best = best_overall_params if best_overall_params else population[0][0]
-        
-        if best_overall_score <= -1e5:
-            logger.error("NO TRADING STRATEGIES FOUND! Using most aggressive possible parameters.")
-            final_best = LSTMStratParams(
-                prediction_threshold=0.00001,  # 0.001% - extremely aggressive
-                indicator_weights={'rsi': 0.33, 'macd': 0.33, 'bb': 0.34},
-                exit_mode='mechanical'
-            )
 
         logger.info(f"Evolution complete. Best score: {best_overall_score:.2f}")
         logger.info(f"Final params: pred_th={final_best.prediction_threshold:.6f}")
