@@ -1,3 +1,0 @@
-# an example of how your trade history gets saved.
-entry_time,exit_time,side,entry_price,exit_price,size,level,gross_pnl,fees,net_pnl
-2025-09-07 14:09:00+00:00,2025-09-07 14:18:00+00:00,short,2.9187081,2.89048902,8.21377183967112,0,0.2317850846454261,0.023857709857677285,0.2079273747877488
