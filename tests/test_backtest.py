@@ -24,11 +24,11 @@ def make_test_data(length=100):
     
     return features, predictions
 
-def test_backtest_run_and_metrics():
+def test_backtest():
     # 1. Setup
     features, predictions = make_test_data()
     params = LSTMStratParams(prediction_threshold=0.01)
-    risk_cfg = RiskConfig(backtest_equity=10000, vol_target=0.15, max_leverage=3, max_daily_loss=0.1, max_exposure=0.9, risk_per_trade=0.1)
+    risk_cfg = RiskConfig(backtest_equity=10000, leverage=3, max_daily_loss=0.1, max_exposure=0.9, risk_per_trade=0.1)
     risk = RiskManager(risk_cfg, lot_size=0.1)
     
     # Mock model for testing
@@ -40,7 +40,7 @@ def test_backtest_run_and_metrics():
     strat = LSTMStrategy(params, risk, model)
 
     # Mock generate_signals to return tuple for scaling support
-    def mock_generate_signals(df, current_positions=None):
+    def mock_generate_signals(df, current_positions=None, equity=None):
         signals = pd.Series([1] * len(df), index=df.index)  # Mock main signals
         scaling_signals = [pd.Series([0] * len(df), index=df.index) for _ in range(2)]  # Mock scaling signals
         exit_signals = [pd.Series([0] * len(df), index=df.index) for _ in range(3)]  # Mock exit signals
@@ -49,9 +49,10 @@ def test_backtest_run_and_metrics():
     strat.generate_signals = mock_generate_signals
     
     cfg = {
-        "fees": 0.001,
-        "slippage": 0.001,
-        "risk": risk_cfg.__dict__
+        "fees": 0.0005,  # Ensure float
+        "slippage": 0.0001,
+        "risk": risk_cfg.__dict__,
+        "paths": {"state_dir": "state"}  # Add paths to avoid potential issues
     }
     bt = Backtester(cfg, strat)
 
