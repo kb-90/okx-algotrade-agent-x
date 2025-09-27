@@ -1,6 +1,6 @@
 # Agent-X: An Autonomous Crypto Trading Agent
 ![agentX Logo](./assets/agentx-banner.jpg)
-## LSTM Price Predictor | EvoSearch Optimizer | IndicatorSet Confirmer
+## LSTM Price Predictor | EvoSearch Optimizer | IndicatorSet Confirmer | OKX & CCXT API
 
 **Agent-X** is a self-improving, autonomous crypto trading bot designed to operate on the OKX exchange. It leverages a hybrid strategy combining a Long Short-Term Memory (LSTM) neural network with a technical set of indicators to help the agent make informed trading decisions. The agent continuously learns and adapts to market conditions through a process of walk-forward optimization and evolutionary search (EvoSearch).
 
