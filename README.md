@@ -26,7 +26,7 @@
 - [User Configuration Guide](#user-configuration-guide)
   - [What You MUST Configure](#what-you-must-configure)
   - [What You CAN Configure](#what-you-can-configure)
-  - [Advanced Configuration (Experts Only)](#advanced-configuration)
+  - [Advanced Configuration (Experts Only)](#advanced-configuration-experts-only)
 - [Usage](#usage)
   - [Training Mode](#training-mode)
   - [Live Trading Mode](#live-trading-mode)
@@ -250,30 +250,34 @@ To load from a custom config file:
       }
     }
     ```
-
   2. Modify your script to load and merge the custom config:
-    ```python
-    import json
-    from agent_x.config import load_config
-    # Load base config
-    cfg = load_config()
-    # Load custom config
-    with open('my_config.json', 'r') as f:
-        custom_cfg = json.load(f)
-    # Merge custom config (custom_cfg takes precedence)
-    def merge_configs(base, custom):
-        for key, value in custom.items():
-            if isinstance(value, dict) and key in base:
-                merge_configs(base[key], value)
-            else:
-                base[key] = value
-        return base
-    cfg = merge_configs(cfg, custom_cfg)
-    ```
+
+```python
+import json
+from agent_x.config import load_config
+
+# Load base config
+cfg = load_config()
+
+# Load custom config
+with open('my_config.json', 'r') as f:
+    custom_cfg = json.load(f)
+
+# Merge custom config (custom_cfg takes precedence)
+def merge_configs(base, custom):
+    for key, value in custom.items():
+        if isinstance(value, dict) and key in base:
+            merge_configs(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+cfg = merge_configs(cfg, custom_cfg)
+```
 
 This approach allows you to maintain different configurations for different trading scenarios while keeping sensitive information (API keys) in environment variables.
 
-### Advanced Configuration
+### Advanced Configuration (Experts Only)
 
 These settings dramatically affect the learning process. **It is strongly recommended that you do not change these unless you fully understand the implications.** The EvoSearch optimizer is designed to find the best values for the `exit_logic` parameters on its own.
 
