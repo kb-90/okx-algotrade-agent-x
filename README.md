@@ -230,10 +230,11 @@ cfg = load_config_for_small_cap(starting_capital=25.0)
 
 While Agent-X primarily uses environment variables for configuration, you can also load settings from a custom JSON configuration file. This is useful for managing multiple configurations or deploying in different environments.
 
-To load from a custom config file:
+### 1. To load from a custom config file
 
-  1. Create a JSON file (e.g., `my_config.json`) with your desired settings:
-    ```json
+Create a JSON file (e.g., `my_config.json`) with your desired settings:
+
+```json
     {
       "symbol": "ETH-USDT-SWAP",
       "timeframe": "15m",
@@ -249,8 +250,10 @@ To load from a custom config file:
         "demo": true
       }
     }
-    ```
-  2. Modify your script to load and merge the custom config:
+
+```
+
+### 2. Modify your script to load and merge the custom config
 
 ```python
 import json
