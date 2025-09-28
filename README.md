@@ -1,5 +1,8 @@
+
 # Agent-X: An Autonomous Crypto Trading Agent
+
 ![agentX Logo](./assets/agentx-banner.jpg)
+
 ## LSTM Price Predictor | EvoSearch Optimizer | IndicatorSet Confirmer | OKX & CCXT API
 
 **Agent-X** is a self-improving, autonomous crypto trading bot designed to operate on the OKX exchange. It leverages a hybrid strategy combining a Long Short-Term Memory (LSTM) neural network with a technical set of indicators to help the agent make informed trading decisions. The agent continuously learns and adapts to market conditions through a process of walk-forward optimization and evolutionary search (EvoSearch).
@@ -23,7 +26,7 @@
 - [User Configuration Guide](#user-configuration-guide)
   - [What You MUST Configure](#what-you-must-configure)
   - [What You CAN Configure](#what-you-can-configure)
-  - [Advanced Configuration (Experts Only)](#advanced-configuration-experts-only)
+  - [Advanced Configuration (Experts Only)](#advanced-configuration)
 - [Usage](#usage)
   - [Training Mode](#training-mode)
   - [Live Trading Mode](#live-trading-mode)
@@ -75,10 +78,10 @@ When you run the bot in `train` mode, it performs a sophisticated learning proce
    - **B) EvoSearch Optimizer (`agent_x/optimize.py`)**: This is the core of the learning process.
      - **What is it?** An evolutionary algorithm that intelligently searches for the best possible strategy parameters.
      - **How it works:**
-       - 1. It creates an initial "population" of random strategy parameters.
-       - 2. It runs a backtest for each set of parameters and assigns a "fitness score" based on performance (a combination of profit (CAGR), risk-adjusted return (Sharpe), and low drawdown).
-       - 3. It takes the best-performing parameters ("elites"), "mutates" them slightly to create new variations, and discards the worst performers.
-       - 4. This process repeats for several "generations", gradually evolving towards a highly optimized set of parameters.
+        1. It creates an initial "population" of random strategy parameters.
+        2. It runs a backtest for each set of parameters and assigns a "fitness score" based on performance (a combination of profit (CAGR), risk-adjusted return (Sharpe), and low drawdown).
+        3. It takes the best-performing parameters ("elites"), "mutates" them slightly to create new variations, and discards the worst performers.
+        4. This process repeats for several "generations", gradually evolving towards a highly optimized set of parameters.
      - **Additional Details:**
        - The optimizer tests a few manual ultra-aggressive parameter sets initially to seed the population.
        - Mutation includes adjusting indicator weights, exit modes, and various thresholds within defined ranges.
@@ -229,54 +232,48 @@ While Agent-X primarily uses environment variables for configuration, you can al
 
 To load from a custom config file:
 
-1. Create a JSON file (e.g., `my_config.json`) with your desired settings:
+  1. Create a JSON file (e.g., `my_config.json`) with your desired settings:
+    ```json
+    {
+      "symbol": "ETH-USDT-SWAP",
+      "timeframe": "15m",
+      "risk": {
+        "backtest_equity": 100.0,
+        "max_leverage": 5.0,
+        "max_daily_loss": 0.15,
+        "max_exposure": 0.8,
+        "risk_per_trade": 0.2
+      },
+      "runtime": {
+        "reoptimize_hours": 12,
+        "demo": true
+      }
+    }
+    ```
 
-```json
-{
-  "symbol": "ETH-USDT-SWAP",
-  "timeframe": "15m",
-  "risk": {
-    "backtest_equity": 100.0,
-    "max_leverage": 5.0,
-    "max_daily_loss": 0.15,
-    "max_exposure": 0.8,
-    "risk_per_trade": 0.2
-  },
-  "runtime": {
-    "reoptimize_hours": 12,
-    "demo": true
-  }
-}
-```
-
-2. Modify your script to load and merge the custom config:
-
-```python
-import json
-from agent_x.config import load_config
-
-# Load base config
-cfg = load_config()
-
-# Load custom config
-with open('my_config.json', 'r') as f:
-    custom_cfg = json.load(f)
-
-# Merge custom config (custom_cfg takes precedence)
-def merge_configs(base, custom):
-    for key, value in custom.items():
-        if isinstance(value, dict) and key in base:
-            merge_configs(base[key], value)
-        else:
-            base[key] = value
-    return base
-
-cfg = merge_configs(cfg, custom_cfg)
-```
+  2. Modify your script to load and merge the custom config:
+    ```python
+    import json
+    from agent_x.config import load_config
+    # Load base config
+    cfg = load_config()
+    # Load custom config
+    with open('my_config.json', 'r') as f:
+        custom_cfg = json.load(f)
+    # Merge custom config (custom_cfg takes precedence)
+    def merge_configs(base, custom):
+        for key, value in custom.items():
+            if isinstance(value, dict) and key in base:
+                merge_configs(base[key], value)
+            else:
+                base[key] = value
+        return base
+    cfg = merge_configs(cfg, custom_cfg)
+    ```
 
 This approach allows you to maintain different configurations for different trading scenarios while keeping sensitive information (API keys) in environment variables.
 
-### Advanced Configuration (Experts Only)
+### Advanced Configuration
 
 These settings dramatically affect the learning process. **It is strongly recommended that you do not change these unless you fully understand the implications.** The EvoSearch optimizer is designed to find the best values for the `exit_logic` parameters on its own.
 
